@@ -721,6 +721,7 @@ private func isMainHistory(_ listNode: NSObject, chat: UIViewController) -> Bool
 private final class HistoryPageRequest: NSObject {
     let direction: HistoryDirection
     let startingRows: Set<ObjectIdentifier>
+    var didMove = false
 
     init(direction: HistoryDirection, startingRows: Set<ObjectIdentifier>) {
         self.direction = direction
@@ -740,18 +741,21 @@ private func pageHistory(_ history: HistoryViewport, direction: HistoryDirection
     guard moved || history.hasHistory(direction) else { return false }
 
     let request = HistoryPageRequest(direction: direction, startingRows: rows)
+    request.didMove = moved
     objc_setAssociatedObject(view, &historyPageKey, request, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     let deadline = ProcessInfo.processInfo.systemUptime + 8
     func complete(_ view: UIView) {
         guard (objc_getAssociatedObject(view, &historyPageKey) as? HistoryPageRequest) === request else { return }
         if let history = HistoryViewport(view), UIAccessibility.isVoiceOverRunning {
             let rows = history.messages()
-            if rows.contains(where: { !request.startingRows.contains(ObjectIdentifier($0.element)) }) || moved {
+            if rows.contains(where: { !request.startingRows.contains(ObjectIdentifier($0.element)) }) || request.didMove {
                 objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
                 UIAccessibility.post(notification: .pageScrolled, argument: nil)
                 return
             }
             if history.hasHistory(direction), ProcessInfo.processInfo.systemUptime < deadline {
+                // A history transaction may extend the scroll range before mounting new rows.
+                request.didMove = history.scroll(direction, distance: history.bounds.height * 0.85)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak view] in
                     if let view { complete(view) }
                 }
@@ -797,6 +801,14 @@ private func installHistoryReading() {
                    attachedNode(view).map(className) == "_TtC7Display21AccessibilityAreaNode",
                    let history = HistoryViewport(containing: view),
                    let next = history.adjacent(to: view, direction: direction) {
+                    if next.frame.intersection(history.bounds).height < min(8, next.frame.height),
+                       view.accessibilityElementIsFocused() {
+                        DispatchQueue.main.async { [weak view] in
+                            guard let view, view.accessibilityElementIsFocused(),
+                                  let current = HistoryViewport(containing: view) else { return }
+                            current.prepareAdjacent(to: view, direction: direction)
+                        }
+                    }
                     return next.element
                 }
                 return original?(view, selector)
