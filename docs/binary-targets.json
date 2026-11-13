@@ -1,0 +1,482 @@
+[
+  {
+    "name": "_TtC10TelegramUI40VideoNavigationControllerDropContentItem",
+    "methods": [],
+    "fields": [
+      "itemNode"
+    ]
+  },
+  {
+    "name": "_TtC10TelegramUIP33_D4A063B8FF03D17A0B86168018A6E0B422ChatControllerNodeView",
+    "methods": [
+      "hitTest:withEvent:",
+      "initWithFrame:",
+      "initWithCoder:",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "node",
+      "inputAccessoryHeight",
+      "hitTestImpl"
+    ]
+  },
+  {
+    "name": "_TtC10TelegramUI28ChatHistoryNavigationButtons",
+    "methods": [
+      "didLoad",
+      "hitTest:withEvent:",
+      "init",
+      "initWithViewBlock:didLoadBlock:",
+      "initWithLayerBlock:didLoadBlock:",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "theme",
+      "preferClearGlass",
+      "dateTimeFormat",
+      "isChatRotated",
+      "reactionsButton",
+      "pollVotesButton",
+      "mentionsButton",
+      "downButton",
+      "upButton",
+      "downPressed",
+      "upPressed",
+      "reactionsPressed",
+      "pollVotesPressed",
+      "mentionsPressed",
+      "directionButtonState",
+      "unreadCount",
+      "mentionCount",
+      "reactionsCount",
+      "pollVotesCount",
+      "absoluteRect"
+    ]
+  },
+  {
+    "name": "_TtCC10TelegramUI28ChatHistoryNavigationButtons13SnapshotState",
+    "methods": [],
+    "fields": [
+      "downButtonSnapshotView"
+    ]
+  },
+  {
+    "name": "_TtC17NavigationBarImplP33_2ABB6CC4B7F241513FE7442B3C027B4224NavigationButtonItemNode",
+    "methods": [
+      "isAccessibilityElement",
+      "setIsAccessibilityElement:",
+      "accessibilityLabel",
+      "setAccessibilityLabel:",
+      "accessibilityHint",
+      "setAccessibilityHint:",
+      "didLoad",
+      "touchesBegan:withEvent:",
+      "touchesMoved:withEvent:",
+      "touchesEnded:withEvent:",
+      "hitTest:withEvent:",
+      "touchesCancelled:withEvent:",
+      "init",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "isGlass",
+      "requestUpdate",
+      "setEnabledListener",
+      "item",
+      "_text",
+      "imageView",
+      "_image",
+      "node",
+      "color",
+      "disabledColor",
+      "_bold",
+      "touchCount",
+      "pressed",
+      "highlightChanged",
+      "pointerInteraction",
+      "_highlighted",
+      "isEnabled"
+    ]
+  },
+  {
+    "name": "_TtC15TabBarComponent20NavigationSearchView",
+    "methods": [
+      "onTapGesture:",
+      "onCloseTapGesture:",
+      "initWithCoder:",
+      "initWithFrame:",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "action",
+      "closeAction",
+      "backgroundView",
+      "glassBackgroundView",
+      "iconView",
+      "searchBarNode",
+      "close",
+      "params"
+    ]
+  },
+  {
+    "name": "_TtC15TabBarComponent15TabBarComponent",
+    "methods": [],
+    "fields": [
+      "theme",
+      "tintSelectedItem",
+      "isLiftedStateEnabled",
+      "strings",
+      "items",
+      "search",
+      "selectedId",
+      "outerInsets",
+      "displayLiquidGlass",
+      "disableTabBarSearch",
+      "showDescOnTabBar"
+    ]
+  },
+  {
+    "name": "_TtCC15TabBarComponent15TabBarComponent4Item",
+    "methods": [],
+    "fields": [
+      "content",
+      "action",
+      "doubleTapAction",
+      "contextAction"
+    ]
+  },
+  {
+    "name": "_TtCC15TabBarComponent15TabBarComponent6Search",
+    "methods": [],
+    "fields": [
+      "isActive",
+      "activate",
+      "deactivate"
+    ]
+  },
+  {
+    "name": "_TtCC15TabBarComponent15TabBarComponent4View",
+    "methods": [
+      "initWithFrame:",
+      "initWithCoder:",
+      "dealloc",
+      "gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:",
+      "onTabSelectionGesture:",
+      "hitTest:withEvent:",
+      "didMoveToWindow",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "backgroundContainer",
+      "glassBackgroundContainer",
+      "liquidLensView",
+      "contextGestureContainerView",
+      "measureItemViews",
+      "itemViews",
+      "selectedItemViews",
+      "searchView",
+      "tabSelectionRecognizer",
+      "itemWithActiveContextGesture",
+      "component",
+      "state",
+      "selectionGestureState",
+      "overrideSelectedItemId",
+      "pendingDoubleTapItem"
+    ]
+  },
+  {
+    "name": "_TtC15TabBarComponentP33_423F15150273F10A5666B748B2A9FFB313ItemComponent",
+    "methods": [],
+    "fields": [
+      "item",
+      "theme",
+      "isCompact",
+      "isSelected",
+      "tintSelectedItem",
+      "isUnconstrained",
+      "showDescOnTabBar"
+    ]
+  },
+  {
+    "name": "_TtCC15TabBarComponentP33_423F15150273F10A5666B748B2A9FFB313ItemComponent4View",
+    "methods": [
+      "initWithFrame:",
+      "initWithCoder:",
+      "dealloc",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "contextContainerView",
+      "imageIcon",
+      "animationIcon",
+      "title",
+      "badge",
+      "component",
+      "state",
+      "setImageListener",
+      "setSelectedImageListener",
+      "setBadgeListener"
+    ]
+  },
+  {
+    "name": "_TtC18SelectablePeerNode18SelectablePeerNode",
+    "methods": [
+      "init",
+      "didLoad",
+      "tapGesture:",
+      "layout",
+      "initWithViewBlock:didLoadBlock:",
+      "initWithLayerBlock:didLoadBlock:",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "contextContainer",
+      "avatarSelectionNode",
+      "avatarNodeContainer",
+      "avatarNode",
+      "avatarBadgeOutline",
+      "avatarBadge",
+      "avatarBadgeLabel",
+      "onlineNode",
+      "checkNode",
+      "textNode",
+      "iconView",
+      "toggleSelection",
+      "contextAction",
+      "currentSelected",
+      "peer",
+      "requiresPremiumForMessaging",
+      "compact",
+      "theme"
+    ]
+  },
+  {
+    "name": "_TtC7Display19ListViewBackingView",
+    "methods": [
+      "setNeedsLayout",
+      "layoutSubviews",
+      "setNeedsDisplay",
+      "touchesBegan:withEvent:",
+      "touchesCancelled:withEvent:",
+      "touchesMoved:withEvent:",
+      "touchesEnded:withEvent:",
+      "hitTest:withEvent:",
+      "accessibilityScroll:",
+      "initWithFrame:",
+      "initWithCoder:",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "target"
+    ]
+  },
+  {
+    "name": "_TtC7Display25NavigationControllerTheme",
+    "methods": [],
+    "fields": [
+      "statusBar",
+      "navigationBar",
+      "emptyAreaColor"
+    ]
+  },
+  {
+    "name": "_TtC7DisplayP33_5F603DA32A8C2EA3EDBE5318F6B34AD624NavigationControllerNode",
+    "methods": [
+      "hitTest:withEvent:",
+      "accessibilityPerformEscape",
+      "init",
+      "initWithViewBlock:didLoadBlock:",
+      "initWithLayerBlock:didLoadBlock:",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "controller"
+    ]
+  },
+  {
+    "name": "_TtCC7DisplayP33_5F603DA32A8C2EA3EDBE5318F6B34AD624NavigationControllerNode4View",
+    "methods": [
+      "layoutSubviews",
+      "initWithFrame:",
+      "initWithCoder:",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "scheduledWithLayout"
+    ]
+  },
+  {
+    "name": "_TtC7Display31NavigationControllerDropContent",
+    "methods": [],
+    "fields": [
+      "position",
+      "item"
+    ]
+  },
+  {
+    "name": "_TtC7Display20NavigationController",
+    "methods": [
+      "presentedViewController",
+      "viewControllers",
+      "setViewControllers:",
+      "topViewController",
+      "initWithNibName:bundle:",
+      "initWithCoder:",
+      "dealloc",
+      "loadView",
+      "pushViewController:animated:",
+      "popToViewController:animated:",
+      "popViewControllerAnimated:",
+      "setViewControllers:animated:",
+      "presentViewController:animated:completion:",
+      "dismissViewControllerAnimated:completion:",
+      "initWithNavigationBarClass:toolbarClass:",
+      "initWithRootViewController:",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "isOpaqueWhenInOverlay",
+      "blocksBackgroundWhenInOverlay",
+      "updateTransitionWhenPresentedAsModal",
+      "_ready",
+      "masterDetailsBlackout",
+      "lockOrientation",
+      "deferScreenEdgeGestures",
+      "mode",
+      "theme",
+      "isFlat",
+      "inCallNavigate",
+      "inCallStatusBar",
+      "updateInCallStatusBarState",
+      "globalScrollToTopNode",
+      "windowScrollToTopProxyViews",
+      "rootContainer",
+      "rootModalFrame",
+      "modalContainers",
+      "overlayContainers",
+      "minimizedContainer",
+      "globalOverlayContainers",
+      "globalOverlayBelowKeyboardContainerParent",
+      "globalOverlayContainerParent",
+      "globalOverlayControllersUpdated",
+      "validLayout",
+      "validStatusBarStyle",
+      "validStatusBarHidden",
+      "ignoreInputHeight",
+      "currentStatusBarExternalHidden",
+      "scheduledLayoutTransitionRequestId",
+      "scheduledLayoutTransitionRequest",
+      "_presentedViewController",
+      "_viewControllers",
+      "_viewControllersPromise",
+      "_overlayControllersPromise",
+      "_displayNode",
+      "statusBarHost",
+      "keyboardViewManager",
+      "updateSupportedOrientations",
+      "updateStatusBar",
+      "detailsPlaceholderNode",
+      "currentTopVisibleOverlayContainerStatusBar",
+      "isUpdatingContainers",
+      "isMaximizing",
+      "_keepModalDismissProgress"
+    ]
+  },
+  {
+    "name": "TGNavigationController",
+    "methods": [
+      "initWithNavigationBarClass:toolbarClass:",
+      "dealloc",
+      "loadView",
+      "_gestureRecognizerShouldBegin:",
+      "_gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:",
+      "navigationController:didShowViewController:animated:",
+      "setDisplayPlayer:",
+      "setMinimizePlayer:",
+      "setupStatusBarOnControllers:",
+      "updateStatusBarOnControllers",
+      "viewDidAppear:",
+      "dimmingViewTapped:",
+      "viewDidLayoutSubviews",
+      "viewDidLoad",
+      "updateControllerLayout:",
+      "setupNavigationBarForController:animated:",
+      "shouldAutorotateToInterfaceOrientation:",
+      "shouldAutorotate",
+      "acquireRotationLock",
+      "releaseRotationLock",
+      "supportedInterfaceOrientations",
+      "willAnimateRotationToInterfaceOrientation:duration:",
+      "setNavigationBarHidden:animated:",
+      "setupPlayerOnControllers:",
+      "updatePlayerOnControllers",
+      "pushViewController:animated:",
+      "setViewControllers:animated:",
+      "navigationBar:shouldPopItem:",
+      "popViewControllerAnimated:",
+      "popToRootViewControllerAnimated:",
+      "myNominalTransitionAnimationDuration",
+      "setPreferredContentSize:",
+      "preferredContentSize",
+      "prefersStatusBarHidden",
+      "preferredStatusBarStyle",
+      "dismissViewControllerAnimated:completion:",
+      "shouldPopController",
+      "setShouldPopController:",
+      "restrictLandscape",
+      "setRestrictLandscape:",
+      "disableInteractiveKeyboardTransition",
+      "setDisableInteractiveKeyboardTransition:",
+      "isInPopTransition",
+      "setIsInPopTransition:",
+      "isInControllerTransition",
+      "setIsInControllerTransition:",
+      "presentationStyle",
+      "setPresentationStyle:",
+      "detachFromPresentingControllerInCompactMode",
+      "setDetachFromPresentingControllerInCompactMode:",
+      "displayPlayer",
+      "minimizePlayer",
+      "showCallStatusBar",
+      "setShowCallStatusBar:",
+      "currentAdditionalNavigationBarHeight",
+      "setCurrentAdditionalNavigationBarHeight:",
+      "forceAdditionalNavigationBarHeight",
+      "setForceAdditionalNavigationBarHeight:",
+      "customDismissSelf",
+      "setCustomDismissSelf:",
+      "wasShowingNavigationBar",
+      "setWasShowingNavigationBar:",
+      "autorotationLock",
+      "setAutorotationLock:",
+      ".cxx_destruct"
+    ],
+    "fields": [
+      "_dimmingTapRecognizer",
+      "_preferredContentSize",
+      "_playerStatusDisposable",
+      "_currentAdditionalStatusBarHeight",
+      "_gestureDelegate",
+      "_animatingControllerPush",
+      "_fixNextInteractiveTransition",
+      "_enterBackgroundObserver",
+      "_becomeActiveObserver",
+      "_didFirstLayout",
+      "_restrictLandscape",
+      "_disableInteractiveKeyboardTransition",
+      "_isInPopTransition",
+      "_isInControllerTransition",
+      "_detachFromPresentingControllerInCompactMode",
+      "_displayPlayer",
+      "_minimizePlayer",
+      "_showCallStatusBar",
+      "_forceAdditionalNavigationBarHeight",
+      "_wasShowingNavigationBar",
+      "_presentationStyle",
+      "_shouldPopController",
+      "_currentAdditionalNavigationBarHeight",
+      "_customDismissSelf",
+      "_autorotationLock"
+    ]
+  }
+]

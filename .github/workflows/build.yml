@@ -1,0 +1,21 @@
+name: Build Accessi gram
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile arm64 iOS patch
+        run: bash scripts/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Accessi-gram-patch
+          path: |
+            build/AccessiGram.dylib
+            scripts/package.py
+            README.md
