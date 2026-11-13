@@ -68,7 +68,7 @@ def main():
                 info = plistlib.loads(data)
                 info['CFBundleDisplayName'] = 'Accessi gram'
                 info['CFBundleName'] = 'Accessi gram'
-                info['AccessiGramPatchVersion'] = '0.2.4'
+                info['AccessiGramPatchVersion'] = '0.2.5'
                 data = plistlib.dumps(info, fmt=plistlib.FMT_BINARY)
             # A localized InfoPlist name takes precedence over the main plist.
             if entry.filename.startswith(app) and entry.filename.endswith('/InfoPlist.strings') and '/PlugIns/' not in entry.filename:

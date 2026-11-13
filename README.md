@@ -1,7 +1,7 @@
 # Accessi gram
 
 以使用者提供的 Turrit 1.5.5（10387）IPA 為基礎的 VoiceOver 補丁。
-目前為 **0.2.4**。
+目前為 **0.2.5**。
 
 ## 這版實作
 
@@ -18,7 +18,7 @@ macOS + Xcode：
 
 ```sh
 bash scripts/build.sh
-python3 scripts/package.py Turrit_1.5.5_78c.ipa build/AccessiGram.dylib Accessi-gram-0.2.4-unsigned.ipa
+python3 scripts/package.py Turrit_1.5.5_78c.ipa build/AccessiGram.dylib Accessi-gram-0.2.5-unsigned.ipa
 ```
 
 也可至 Actions 的 **Build Accessi gram** 下載已編譯補丁。
@@ -29,4 +29,4 @@ python3 scripts/package.py Turrit_1.5.5_78c.ipa build/AccessiGram.dylib Accessi-
 
 ## 給接手的 Open Code
 
-先讀 `docs/BASELINE.md` 和 `docs/HANDOFF.md`。不要直接把 0.2.4 標成穩定版，也不要依 Swift 欄位的固定記憶體偏移修改資料。
+先讀 `docs/BASELINE.md` 和 `docs/HANDOFF.md`。不要直接把 0.2.5 標成穩定版，也不要依 Swift 欄位的固定記憶體偏移修改資料。
