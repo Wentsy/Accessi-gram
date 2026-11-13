@@ -290,7 +290,7 @@ private func installChat() {
             if UIAccessibility.isVoiceOverRunning, let history = HistoryViewport(view),
                let move = HistoryDirection(direction) {
                 state(history.chat).pendingLatest = false
-                return pageHistory(history, direction: move)
+                return pageHistory(history, direction: move, anchor: history.readingAnchor(direction))
             }
             return original(view, scrollSel, direction)
         }
@@ -318,7 +318,7 @@ public func AGStart() {
     installSupplementalControls()
     installChat()
     installHistoryReading()
-    NSLog("[Accessi gram] 0.2.3 loaded; installed %ld target hooks", installed.count)
+    NSLog("[Accessi gram] 0.2.4 loaded; installed %ld target hooks", installed.count)
 }
 
 private func objectField(_ object: Any, _ name: String) -> NSObject? {
@@ -601,12 +601,48 @@ private func updateMessage(_ item: NSObject) {
     let existing = (area.accessibilityCustomActions ?? []).filter { action in !messageMenuLabels.contains { $0.0 == action.name } }
     guard let options = existing.first(where: { enumCase(field($0, "action")) == "options" }),
           item.responds(to: NSSelectorFromString("performLocalAccessibilityCustomAction:")) else { return }
+    if (area.accessibilityCustomActions ?? []).filter({ action in
+        messageMenuLabels.contains { $0.0 == action.name }
+    }).count == messageMenuLabels.count { return }
     area.accessibilityCustomActions = existing + messageMenuLabels.map { name, titles in
         UIAccessibilityCustomAction(name: name) { [weak area, weak item] _ in
             guard let area, let item else { return false }
             return performMenuAction(titles, area: area, item: item, options: options)
         }
     }
+}
+
+// Bubble layouts differ between ordinary messages, channel posts and albums.
+private func messageElement(_ item: NSObject, row: UIView) -> UIView {
+    guard let area = viewField(item, "messageAccessibilityArea"), visible(area, in: row),
+          !area.bounds.isEmpty else { return row }
+    updateMessage(item)
+    let data = field(item, "accessibilityData")
+    let label = area.accessibilityLabel ?? data.flatMap { field($0, "label") as? String }
+    var value = area.accessibilityValue ?? data.flatMap { field($0, "value") as? String }
+    // Channel cards and albums can expose only their media label in the stock area.
+    let content = field(item, "item").flatMap { field($0, "content") }
+    if let payload = list(content).first {
+        let entries = enumCase(content) == "group" ? list(payload) : [payload]
+        var included = Set<String>()
+        let captions = entries.compactMap { entry -> String? in
+            guard let message = list(entry).first, let caption = field(message, "text") as? String,
+                  !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !(label?.contains(caption) ?? false), !(value?.contains(caption) ?? false),
+                  included.insert(caption).inserted else { return nil }
+            return caption
+        }
+        if !captions.isEmpty {
+            value = (captions + [value].compactMap { $0 }).joined(separator: "\n")
+        }
+    }
+    guard [label, value].compactMap({ $0 }).contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+        return row
+    }
+    area.accessibilityLabel = label
+    area.accessibilityValue = value
+    area.isAccessibilityElement = true
+    return area
 }
 
 private enum HistoryDirection {
@@ -648,14 +684,21 @@ private struct HistoryViewport {
 
     var bounds: CGRect { historyBounds(view, chat: chat) }
 
+    func readingAnchor(_ raw: Int) -> UIView? {
+        guard raw == UIAccessibilityScrollDirection.next.rawValue ||
+                raw == UIAccessibilityScrollDirection.previous.rawValue,
+              let focus = UIAccessibility.focusedElement(using: .notificationVoiceOver) as? UIView else { return nil }
+        return messages(mounted: true).first { $0.element === focus || focus.isDescendant(of: $0.element) }?.element
+    }
+
     func messages(mounted: Bool = false) -> [(element: UIView, frame: CGRect)] {
         guard let window = view.window else { return [] }
         let bounds = self.bounds
         return list(field(node, "itemNodes")).compactMap { raw -> (UIView, CGRect)? in
             guard let item = raw as? NSObject, field(item, "index") != nil,
-                  let row = nodeView(item), visible(row, in: view),
-                  let area = viewField(item, "messageAccessibilityArea"),
-                  visible(area, in: row), !area.bounds.isEmpty else { return nil }
+                  let row = nodeView(item), visible(row, in: view) else { return nil }
+            let area = messageElement(item, row: row)
+            guard area !== row else { return nil }
             let rect = window.convert(area.bounds, from: area)
             guard mounted || rect.intersection(bounds).height >= min(8, rect.height) else { return nil }
             return (area, rect)
@@ -692,13 +735,14 @@ private struct HistoryViewport {
         return rows.indices.contains(next) ? rows[next] : nil
     }
 
-    func prepareAdjacent(to element: UIView, direction: HistoryDirection) {
-        guard let window = view.window else { return }
+    @discardableResult
+    func prepareAdjacent(to element: UIView, direction: HistoryDirection) -> Bool {
+        guard let window = view.window else { return false }
         let bounds = self.bounds
         let anchor = window.convert(element.bounds, from: element)
-        guard anchor.intersects(bounds) else { return }
+        guard anchor.intersects(bounds) else { return false }
         let neighbor = adjacent(to: element, direction: direction)?.frame
-        if let neighbor, neighbor.intersection(bounds).height >= min(44, neighbor.height) { return }
+        if let neighbor, neighbor.intersection(bounds).height >= min(44, neighbor.height) { return false }
         // Keep a slice of the current message visible, including a message taller than the screen.
         let overlap = min(44, anchor.height / 2)
         let retainedDistance = direction == .older
@@ -709,7 +753,7 @@ private struct HistoryViewport {
                 ? bounds.minY - $0.maxY + min(44, $0.height)
                 : $0.minY - bounds.maxY + min(44, $0.height)
         } ?? bounds.height * 0.85
-        _ = scroll(direction, distance: min(retainedDistance, revealDistance))
+        return scroll(direction, distance: min(retainedDistance, revealDistance))
     }
 }
 
@@ -721,6 +765,7 @@ private func isMainHistory(_ listNode: NSObject, chat: UIViewController) -> Bool
 private final class HistoryPageRequest: NSObject {
     let direction: HistoryDirection
     let startingRows: Set<ObjectIdentifier>
+    weak var anchor: UIView?
     var didMove = false
 
     init(direction: HistoryDirection, startingRows: Set<ObjectIdentifier>) {
@@ -730,17 +775,20 @@ private final class HistoryPageRequest: NSObject {
 }
 private var historyPageKey: UInt8 = 0
 
-private func pageHistory(_ history: HistoryViewport, direction: HistoryDirection) -> Bool {
+private func pageHistory(_ history: HistoryViewport, direction: HistoryDirection, anchor: UIView? = nil) -> Bool {
     let view = history.view
     if let pending = objc_getAssociatedObject(view, &historyPageKey) as? HistoryPageRequest,
-       pending.direction == direction { return true }
+       pending.direction == direction, pending.anchor === anchor { return true }
     objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
     let rows = Set(history.messages().map { ObjectIdentifier($0.element) })
-    let moved = history.scroll(direction, distance: history.bounds.height * 0.85)
-    guard moved || history.hasHistory(direction) else { return false }
+    let moved: Bool
+    if let anchor { moved = history.prepareAdjacent(to: anchor, direction: direction) }
+    else { moved = history.scroll(direction, distance: history.bounds.height * 0.85) }
+    guard moved || history.hasHistory(direction) || anchor.flatMap({ history.adjacent(to: $0, direction: direction) }) != nil else { return false }
 
     let request = HistoryPageRequest(direction: direction, startingRows: rows)
+    request.anchor = anchor
     request.didMove = moved
     objc_setAssociatedObject(view, &historyPageKey, request, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     let deadline = ProcessInfo.processInfo.systemUptime + 8
@@ -748,18 +796,40 @@ private func pageHistory(_ history: HistoryViewport, direction: HistoryDirection
         guard (objc_getAssociatedObject(view, &historyPageKey) as? HistoryPageRequest) === request else { return }
         if let history = HistoryViewport(view), UIAccessibility.isVoiceOverRunning {
             let rows = history.messages()
-            if rows.contains(where: { !request.startingRows.contains(ObjectIdentifier($0.element)) }) || request.didMove {
-                objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-                UIAccessibility.post(notification: .pageScrolled, argument: nil)
-                return
-            }
-            if history.hasHistory(direction), ProcessInfo.processInfo.systemUptime < deadline {
-                // A history transaction may extend the scroll range before mounting new rows.
-                request.didMove = history.scroll(direction, distance: history.bounds.height * 0.85)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak view] in
-                    if let view { complete(view) }
+            if let anchor = request.anchor {
+                let adjacent = history.adjacent(to: anchor, direction: direction)
+                if let adjacent, rows.contains(where: { $0.element === adjacent.element }) {
+                    objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                    if anchor.accessibilityElementIsFocused() {
+                        UIAccessibility.post(notification: .layoutChanged, argument: adjacent.element)
+                    }
+                    return
                 }
-                return
+                if !anchor.accessibilityElementIsFocused() {
+                    objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                    return
+                }
+                if (adjacent != nil || history.hasHistory(direction) || request.didMove),
+                   ProcessInfo.processInfo.systemUptime < deadline {
+                    request.didMove = history.prepareAdjacent(to: anchor, direction: direction)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak view] in
+                        if let view { complete(view) }
+                    }
+                    return
+                }
+            } else {
+                if rows.contains(where: { !request.startingRows.contains(ObjectIdentifier($0.element)) }) || request.didMove {
+                    objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                    UIAccessibility.post(notification: .pageScrolled, argument: nil)
+                    return
+                }
+                if history.hasHistory(direction), ProcessInfo.processInfo.systemUptime < deadline {
+                    request.didMove = history.scroll(direction, distance: history.bounds.height * 0.85)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak view] in
+                        if let view { complete(view) }
+                    }
+                    return
+                }
             }
         }
         objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
@@ -836,7 +906,9 @@ private func installHistoryReading() {
                attachedNode(view).map(className) == "_TtC7Display21AccessibilityAreaNode",
                let history = HistoryViewport(containing: view), let direction = HistoryDirection(raw) {
                 state(history.chat).pendingLatest = false
-                return pageHistory(history, direction: direction)
+                let isReading = raw == UIAccessibilityScrollDirection.next.rawValue ||
+                    raw == UIAccessibilityScrollDirection.previous.rawValue
+                return pageHistory(history, direction: direction, anchor: isReading ? view : nil)
             }
             return oldScroll(view, scrollSel, raw)
         }
@@ -847,11 +919,23 @@ private func installHistoryReading() {
 private func historyBounds(_ view: UIView, chat: UIViewController?) -> CGRect {
     var bounds = view.window?.convert(view.bounds, from: view) ?? view.bounds
     if let chat, let node = chatNode(chat) {
-        for name in ["textInputPanelNode", "inputPanelNode", "inputNode", "inputPanelContainerNode"] {
-            guard let panel = viewField(node, name), visible(panel, in: chat.view) else { continue }
-            let frame = view.window?.convert(panel.bounds, from: panel) ?? .zero
-            if frame.height > 0, frame.minY > bounds.midY, frame.minY < bounds.maxY { bounds.size.height = frame.minY - bounds.minY }
+        let middle = bounds.midY
+        var top = bounds.minY
+        var bottom = bounds.maxY
+        for name in ["navigationBar", "currentTitleAccessoryPanelNode", "headerPanelsView"] {
+            let panel = viewField(node, name) ?? field(node, name).flatMap { viewField($0, "view") }
+            guard let panel, visible(panel, in: chat.view), let window = view.window else { continue }
+            let frame = window.convert(panel.bounds, from: panel)
+            if frame.intersects(bounds), frame.minY < middle, frame.maxY <= middle { top = max(top, frame.maxY) }
         }
+        for name in ["textInputPanelNode", "inputPanelNode", "secondaryInputPanelNode", "inputNode",
+                     "inputPanelContainerNode", "footerPanelsView", "inputContextPanelNode"] {
+            let panel = viewField(node, name) ?? field(node, name).flatMap { viewField($0, "view") }
+            guard let panel, visible(panel, in: chat.view), let window = view.window else { continue }
+            let frame = window.convert(panel.bounds, from: panel)
+            if frame.intersects(bounds), frame.minY >= middle { bottom = min(bottom, frame.minY) }
+        }
+        bounds = CGRect(x: bounds.minX, y: top, width: bounds.width, height: max(0, bottom - top))
     } else if let window = view.window {
         for bar in descendants(window, excluding: view) where bar is UITabBar || className(bar) == "_TtCC15TabBarComponent15TabBarComponent4View" {
             let frame = window.convert(bar.bounds, from: bar)
@@ -898,8 +982,13 @@ private func chatListElements(_ view: UIView, listNode: Any, chat: UIViewControl
         }
     }
     guard !rows.isEmpty else { return [] as NSArray }
-    for row in rows { updateMessage(row.0) }
-    return rows.map { viewField($0.0, "messageAccessibilityArea") ?? $0.1 } as NSArray
+    return rows.compactMap { item, row, _ -> UIView? in
+        let element = messageElement(item, row: row)
+        if element === row { return row }
+        guard let window = view.window,
+              window.convert(element.bounds, from: element).intersection(bounds).height >= min(8, element.bounds.height) else { return nil }
+        return element
+    } as NSArray
 }
 
 private func nearestNode(_ view: UIView?, matching name: String) -> NSObject? {
