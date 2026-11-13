@@ -194,7 +194,7 @@ private func back(_ controller: UIViewController) -> Bool {
     if name == "_TtC9GalleryUI17GalleryController", send(controller, "donePressed") { return true }
     let animated = !UIAccessibility.isReduceMotionEnabled
     if let presented = controller.presentedViewController, !presented.isBeingDismissed {
-        presented.dismiss(animated: animated)
+        controller.dismiss(animated: animated)
         return true
     }
     if let nav = controller as? UINavigationController ?? controller.navigationController,
@@ -306,6 +306,7 @@ public func AGStart() {
     installEscape()
     installNavigationControls()
     installOverlayViews()
+    installSupplementalControls()
     installChat()
     NSLog("[Accessi gram] 0.2.0 loaded; installed %ld target hooks", installed.count)
 }
@@ -437,6 +438,9 @@ private func overlayEscape(_ node: NSObject) -> Bool {
         return true
     case "_TtC15ShareController19ShareControllerNode":
         return send(node, "cancelButtonPressed")
+    case "_TtC7Display19AlertControllerNode":
+        if let dismiss = field(node, "dismiss") as? (Bool) -> Void { dismiss(true); return true }
+        return invoke(node, "dismiss")
     case "_TtC27ChatEntityKeyboardInputNode27ChatEntityKeyboardInputNode":
         return invoke(node, "switchToTextInput")
     case "_TtC21ContextControllerImpl21ContextControllerNode":
@@ -470,7 +474,9 @@ private func installOverlayViews() {
 }
 
 private func updateInput(_ panel: NSObject) {
-    expose(viewField(panel, "attachmentButton"), "附件")
+    if let attachment = viewField(panel, "attachmentButton") {
+        expose(attachment, "附件", enabled: !attachment.accessibilityTraits.contains(.notEnabled))
+    }
     let input = viewField(panel, "richTextInputNode")
     if let editor = input.flatMap({ root in
         (root as? UITextView) ?? descendants(root).compactMap { $0 as? UITextView }.first
@@ -507,7 +513,16 @@ private func updateInput(_ panel: NSObject) {
         expose(viewField(actions, "sendButton"), sendLabel, enabled: field(actions, "isSendDisabled") as? Bool != true)
         if let mic = objectField(actions, "micButton") {
             let video = enumCase(field(mic, "mode")).lowercased().contains("video")
-            expose(nodeView(mic), video ? "錄製視訊訊息" : "錄製語音訊息")
+            if let micView = nodeView(mic) {
+                expose(micView, video ? "錄製視訊訊息" : "錄製語音訊息")
+                let name = video ? "切換到語音錄製" : "切換到視訊錄製"
+                if micView.accessibilityCustomActions?.first?.name != name {
+                    micView.accessibilityCustomActions = [UIAccessibilityCustomAction(name: name) { [weak mic] _ in
+                        guard let mic else { return false }
+                        return invoke(mic, "switchMode")
+                    }]
+                }
+            }
         }
     }
 }
@@ -563,7 +578,9 @@ private func updateMessage(_ item: NSObject) {
             area.accessibilityLabel = "\(author)，\(label)"
         }
         if let quote, !quote.isEmpty, !(content?.contains(quote) ?? false), !label.contains(quote) {
-            area.accessibilityLabel = "\(area.accessibilityLabel ?? label)，引用：\(quote)"
+            let sender = author.flatMap { $0.isEmpty ? nil : $0 }
+            let body = sender == label ? nil : label
+            area.accessibilityLabel = [sender, "引用：\(quote)", body].compactMap { $0 }.joined(separator: "，")
         }
         if let time, !time.isEmpty, !(content?.contains(time) ?? false) {
             area.accessibilityValue = [content, time].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "，")
@@ -599,16 +616,16 @@ private final class HistoryEdges: NSObject {
 }
 private var edgesKey: UInt8 = 0
 private func historyBounds(_ view: UIView, chat: UIViewController?) -> CGRect {
-    var bounds = view.bounds
+    var bounds = view.window?.convert(view.bounds, from: view) ?? view.bounds
     if let chat, let node = chatNode(chat) {
         for name in ["textInputPanelNode", "inputPanelNode", "inputNode", "inputPanelContainerNode"] {
             guard let panel = viewField(node, name), visible(panel, in: chat.view) else { continue }
-            let frame = view.convert(panel.bounds, from: panel)
+            let frame = view.window?.convert(panel.bounds, from: panel) ?? .zero
             if frame.height > 0, frame.minY > bounds.midY, frame.minY < bounds.maxY { bounds.size.height = frame.minY - bounds.minY }
         }
     } else if let window = view.window {
         for bar in descendants(window, excluding: view) where bar is UITabBar || className(bar) == "_TtCC15TabBarComponent15TabBarComponent4View" {
-            let frame = view.convert(bar.bounds, from: bar)
+            let frame = window.convert(bar.bounds, from: bar)
             if frame.intersects(bounds), frame.minY > bounds.midY { bounds.size.height = frame.minY - bounds.minY }
         }
     }
@@ -617,7 +634,7 @@ private func historyBounds(_ view: UIView, chat: UIViewController?) -> CGRect {
 private func historyRows(_ view: UIView, _ listNode: Any, _ bounds: CGRect) -> [(NSObject, UIView, CGRect)] {
     list(field(listNode, "itemNodes")).compactMap { raw -> (NSObject, UIView, CGRect)? in
         guard let item = raw as? NSObject, let row = nodeView(item), visible(row, in: view) else { return nil }
-        let rect = view.convert(row.bounds, from: row)
+        let rect = view.window?.convert(row.bounds, from: row) ?? view.convert(row.bounds, from: row)
         guard !rect.isEmpty, rect.midY >= bounds.minY, rect.midY < bounds.maxY, rect.intersects(bounds) else { return nil }
         return (item, row, rect)
     }.sorted { $0.2.minY < $1.2.minY }
@@ -625,7 +642,8 @@ private func historyRows(_ view: UIView, _ listNode: Any, _ bounds: CGRect) -> [
 private func edge(_ element: PageEdge, older: Bool, view: UIView, rows: [(NSObject, UIView, CGRect)], bounds: CGRect, edges: HistoryEdges) {
     element.accessibilityLabel = older ? "較早的訊息" : "較新的訊息"
     element.accessibilityTraits = .button
-    element.accessibilityFrameInContainerSpace = CGRect(x: bounds.midX - 12, y: older ? bounds.minY : bounds.maxY - 4, width: 24, height: 4)
+    let frame = CGRect(x: bounds.midX - 12, y: older ? bounds.minY : bounds.maxY - 4, width: 24, height: 4)
+    element.accessibilityFrameInContainerSpace = view.convert(frame, from: view.window)
     let indices = Set(rows.compactMap { field($0.0, "index") as? Int })
     element.advance = { [weak view, weak edges] in
         guard let view, let edges, !edges.paging,
@@ -657,8 +675,10 @@ private func chatListElements(_ view: UIView, listNode: Any, chat: UIViewControl
     let bounds = historyBounds(view, chat: chat)
     let rows = historyRows(view, listNode, bounds)
     guard let chat else {
-        let chatRows = rows.filter { className($0.0).hasSuffix("ChatListItemNode") }
-        return chatRows.isEmpty ? nil : rows.map { $0.1 } as NSArray
+        let isChatList = list(field(listNode, "itemNodes")).contains { item in
+            (item as? NSObject).map { className($0).hasSuffix("ChatListItemNode") } ?? false
+        }
+        return isChatList ? rows.map { $0.1 } as NSArray : nil
     }
     if let node = chatNode(chat) {
         if let panel = objectField(node, "inputNode"), let front = nodeView(panel), isModalNode(panel), visible(front, in: chat.view) {
@@ -666,8 +686,14 @@ private func chatListElements(_ view: UIView, listNode: Any, chat: UIViewControl
             return [] as NSArray
         }
         if let input = objectField(node, "textInputPanelNode") { updateInput(input) }
+        if let navigation = objectField(node, "navigateButtons"), let buttons = nodeView(navigation), let container = buttons.superview {
+            buttons.accessibilityElementsHidden = false
+            buttons.accessibilityElements = ["downButton", "upButton", "mentionsButton", "reactionsButton", "pollVotesButton"].compactMap { name in
+                viewField(navigation, name)
+            }.filter { visible($0, in: container) && !$0.bounds.isEmpty }
+        }
     }
-    guard !rows.isEmpty else { return nil }
+    guard !rows.isEmpty else { return [] as NSArray }
     for row in rows { updateMessage(row.0) }
     let edges = (objc_getAssociatedObject(view, &edgesKey) as? HistoryEdges) ?? HistoryEdges(view)
     objc_setAssociatedObject(view, &edgesKey, edges, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
@@ -688,4 +714,96 @@ private func chatListElements(_ view: UIView, listNode: Any, chat: UIViewControl
         }
     }
     return result as NSArray
+}
+
+private func nearestNode(_ view: UIView?, matching name: String) -> NSObject? {
+    var current = view
+    while let view = current {
+        if let node = attachedNode(view), className(node) == name { return node }
+        current = view.superview
+    }
+    return nil
+}
+private func browserButtonLabel(_ object: NSObject) -> String? {
+    guard let view = object as? UIView else { return nil }
+    for image in descendants(view) where className(image) == "_TtCC19BundleIconComponent19BundleIconComponent4View" {
+        guard let component = field(image, "component"), let icon = field(component, "name") as? String else { continue }
+        switch icon {
+        case "Navigation/Close", "Instant View/Close": return "關閉"
+        case "Instant View/Back": return "返回上一頁"
+        case "Instant View/Forward": return "前往下一頁"
+        default: continue
+        }
+    }
+    return nil
+}
+private func installSupplementalControls() {
+    target("_TtCC20PlainButtonComponent20PlainButtonComponent4View") { cls in
+        let oldElement = originalBool(cls, "isAccessibilityElement")
+        let oldActivate = originalBool(cls, "accessibilityActivate")
+        let isElement: @convention(block) (NSObject) -> Bool = { object in
+            if UIAccessibility.isVoiceOverRunning, browserButtonLabel(object) != nil { return true }
+            return oldElement?(object) ?? false
+        }
+        let activate: @convention(block) (NSObject) -> Bool = { object in
+            if UIAccessibility.isVoiceOverRunning, browserButtonLabel(object) != nil {
+                if let component = field(object, "component"), field(component, "isEnabled") as? Bool == false { return false }
+                return send(object, "pressed")
+            }
+            return oldActivate?(object) ?? false
+        }
+        let labelSel = NSSelectorFromString("accessibilityLabel")
+        let labelOriginal = unsafeBitCast(method_getImplementation(class_getInstanceMethod(cls, labelSel)!), to: (@convention(c) (NSObject, Selector) -> NSString?).self)
+        let label: @convention(block) (NSObject) -> NSString? = { object in
+            if UIAccessibility.isVoiceOverRunning, let value = browserButtonLabel(object) { return value as NSString }
+            return labelOriginal(object, labelSel)
+        }
+        let traitsSel = NSSelectorFromString("accessibilityTraits")
+        let traitsOriginal = unsafeBitCast(method_getImplementation(class_getInstanceMethod(cls, traitsSel)!), to: (@convention(c) (NSObject, Selector) -> UInt64).self)
+        let traits: @convention(block) (NSObject) -> UInt64 = { object in
+            var result = UIAccessibilityTraits(rawValue: traitsOriginal(object, traitsSel))
+            if UIAccessibility.isVoiceOverRunning, browserButtonLabel(object) != nil {
+                result.insert(.button)
+                if let component = field(object, "component"), field(component, "isEnabled") as? Bool == false { result.insert(.notEnabled) }
+            }
+            return result.rawValue
+        }
+        replace(cls, "isAccessibilityElement", isElement, "B@:")
+        replace(cls, "accessibilityActivate", activate, "B@:")
+        replace(cls, "accessibilityLabel", label, "@@:")
+        replace(cls, "accessibilityTraits", traits, "Q@:")
+    }
+    installButton("_TtC7Display26TextAlertContentActionNode", action: {
+        field($0, "actionEnabled") as? Bool != false && send($0, "pressed")
+    }, label: {
+        guard let action = field($0, "action") else { return nil }
+        return field(action, "title") as? String
+    })
+    installButton("_TtC15ShareControllerP33_8BC0A62A8A0E545842FF4152006F0A2216CancelButtonNode", action: {
+        nearestNode(nodeView($0), matching: "_TtC15ShareController19ShareControllerNode").map { send($0, "cancelButtonPressed") } ?? false
+    }, label: { text(field($0, "labelNode")) ?? "關閉分享" })
+    installButton("_TtC15ShareController21ShareActionButtonNode", action: {
+        nearestNode(nodeView($0), matching: "_TtC15ShareController19ShareControllerNode").map { send($0, "actionButtonPressed") } ?? false
+    }, label: { text(field($0, "badgeLabel")) ?? "分享" })
+    installButton("_TtC10TelegramUI31ChatHistoryNavigationButtonNode", action: {
+        field($0, "isEnabled") as? Bool != false && invoke($0, "tapped")
+    }, label: { object in
+        switch enumCase(field(object, "type")) {
+        case "down": return "跳到最新訊息"
+        case "up": return "上一筆搜尋結果"
+        case "mentions": return "跳到提及你的訊息"
+        case "reactions": return "跳到新回應"
+        case "pollVotes": return "跳到新投票"
+        default: return nil
+        }
+    })
+    installButton("_TtC33ChatTextInputMediaRecordingButton33ChatTextInputMediaRecordingButton", action: { object in
+        if field(object, "hasRecorder") as? Bool == true { return send(object, "handleStopTap") }
+        guard send(object, "micButtonInteractionBegan") else { return false }
+        _ = send(object, "micButtonInteractionLocked")
+        return true
+    }, label: { object in
+        if field(object, "hasRecorder") as? Bool == true { return "停止錄製" }
+        return enumCase(field(object, "mode")).lowercased().contains("video") ? "錄製視訊訊息" : "錄製語音訊息"
+    })
 }
