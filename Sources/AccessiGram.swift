@@ -51,9 +51,16 @@ private final class ActionElement: UIAccessibilityElement {
     override func accessibilityActivate() -> Bool { activate() }
 }
 private final class TabCache: NSObject {
-    var elements: [ObjectIdentifier: ActionElement] = [:]
+    var elements: [AnyHashable: ActionElement] = [:]
 }
 private var tabCacheKey: UInt8 = 0
+
+private func tabIdentity(_ item: Any) -> AnyHashable? {
+    guard let content = field(item, "content"),
+          let payload = Mirror(reflecting: content).children.first?.value else { return nil }
+    if let tab = payload as? UITabBarItem { return AnyHashable(ObjectIdentifier(tab)) }
+    return field(payload, "id") as? AnyHashable
+}
 
 private func tabElements(_ view: UIView) -> NSArray? {
     guard let component = field(view, "component") else { return nil }
@@ -61,19 +68,18 @@ private func tabElements(_ view: UIView) -> NSArray? {
     if let existing = objc_getAssociatedObject(view, &tabCacheKey) as? TabCache { cache = existing }
     else { cache = TabCache(); objc_setAssociatedObject(view, &tabCacheKey, cache, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     // itemViews excludes the duplicate selected-item rendering layer and measuring views.
-    var rendered: [ObjectIdentifier: UIView] = [:]
+    var rendered: [AnyHashable: UIView] = [:]
     for pair in list(field(view, "itemViews")) {
         let values = Array(Mirror(reflecting: pair).children)
         guard values.count == 2, let itemView = field(values[1].value, "view") as? UIView,
               let itemComponent = field(itemView, "component"),
               let item = field(itemComponent, "item") as AnyObject? else { continue }
-        rendered[ObjectIdentifier(item)] = itemView
+        if let key = tabIdentity(item) { rendered[key] = itemView }
     }
     var result: [Any] = []
-    var active: Set<ObjectIdentifier> = []
+    var active: Set<AnyHashable> = []
     for raw in list(field(component, "items")) {
-        let item = raw as AnyObject
-        let key = ObjectIdentifier(item)
+        guard let key = tabIdentity(raw) else { continue }
         guard let itemView = rendered[key], !itemView.isHidden, itemView.alpha > 0.01,
               let content = field(raw, "content"),
               let payload = Mirror(reflecting: content).children.first?.value,
@@ -318,7 +324,7 @@ public func AGStart() {
     installSupplementalControls()
     installChat()
     installHistoryReading()
-    NSLog("[Accessi gram] 0.2.1 loaded; installed %ld target hooks", installed.count)
+    NSLog("[Accessi gram] 0.2.2 loaded; installed %ld target hooks", installed.count)
 }
 
 private func objectField(_ object: Any, _ name: String) -> NSObject? {
@@ -429,7 +435,6 @@ private func isModalNode(_ node: NSObject) -> Bool {
     let name = className(node)
     return name == "_TtC7Display24NavigationModalContainer" ||
         name == "_TtC9GalleryUI21GalleryControllerNode" ||
-        name == "_TtCC9BrowserUI13BrowserScreen4Node" ||
         name == "_TtC7Display19AlertControllerNode" ||
         name == "_TtC15ShareController19ShareControllerNode" ||
         name == "_TtC27ChatEntityKeyboardInputNode27ChatEntityKeyboardInputNode" ||
@@ -618,6 +623,7 @@ private final class HistoryReading: NSObject {
     weak var focusedRow: UIView?
     var direction: HistoryDirection?
     var generation = 0
+    var lastFrame: CGRect?
 }
 private var historyReadingKey: UInt8 = 0
 
@@ -645,13 +651,14 @@ private func installHistoryReading() {
             if abs(frame.midY - previousY) > 1 {
                 reading.direction = frame.midY < previousY ? .older : .newer
             }
-        } else if rows.count > 1 {
+        } else if !rows.isEmpty {
             if row === rows.first?.1 { reading.direction = .older }
             else if row === rows.last?.1 { reading.direction = .newer }
             else { reading.direction = nil }
         }
         reading.focusedRow = row
         reading.generation += 1
+        reading.lastFrame = nil
         state(chat).pendingLatest = false
 
         guard let direction = reading.direction else { return }
@@ -690,7 +697,8 @@ private func bufferHistory(_ view: UIView, chat: UIViewController, row: UIView,
                            generation: Int, previousWindow: HistoryWindow?, deadline: TimeInterval) {
     guard reading.generation == generation, reading.focusedRow === row,
           UIAccessibility.isVoiceOverRunning, let window = view.window, visible(row, in: view),
-          let focus = UIAccessibility.focusedElement(using: .notificationVoiceOver) as? UIView,
+          let focused = UIAccessibility.focusedElement(using: .notificationVoiceOver),
+          let focus = focused as? UIView ?? (focused as? UIAccessibilityElement)?.accessibilityContainer as? UIView,
           focus === row || focus.isDescendant(of: row),
           let listNode = objectField(view, "target"), isMainHistory(listNode, chat: chat),
           let scroller = objectField(listNode, "scroller") as? UIScrollView,
@@ -726,12 +734,14 @@ private func bufferHistory(_ view: UIView, chat: UIViewController, row: UIView,
         last: mounted.last.map(ObjectIdentifier.init)
     )
 
-    if currentWindow != previousWindow {
+    if currentWindow != previousWindow || reading.lastFrame != frame {
+        reading.lastFrame = frame
         // Move by part of a screen and keep the focused bubble on screen.
         // ListView's UIScrollView delegate updates native visible ranges and requests history.
         let retained = min(52, frame.height * 0.5)
         let available = direction == .older ? bounds.maxY - frame.minY - retained : frame.maxY - bounds.minY - retained
-        let distance = min(bounds.height * 0.36, available)
+        let needed = direction == .older ? bounds.minY + bounds.height * 0.36 - frame.minY : frame.maxY - (bounds.maxY - bounds.height * 0.36)
+        let distance = min(max(bounds.height * 0.36, needed), available)
         let sign: CGFloat = towardHigherIndex ? 1 : -1
         let offset = scroller.contentOffset
         let minimum = -scroller.adjustedContentInset.top
@@ -743,7 +753,7 @@ private func bufferHistory(_ view: UIView, chat: UIViewController, row: UIView,
     }
     // While the focused message still borders an unloaded window, give Telegram time
     // to apply it. The notification for the next real message cancels this wait.
-    if neighbors == 0, ProcessInfo.processInfo.systemUptime < deadline {
+    if neighbors < 2, ProcessInfo.processInfo.systemUptime < deadline {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) { [weak view, weak chat, weak row, weak reading] in
             guard let view, let chat, let row, let reading else { return }
             bufferHistory(view, chat: chat, row: row, reading: reading, direction: direction,
@@ -788,6 +798,10 @@ private func chatListElements(_ view: UIView, listNode: Any, chat: UIViewControl
             (item as? NSObject).map { className($0).hasSuffix("ChatListItemNode") } ?? false
         }
         return isChatList ? rows.map { $0.1 } as NSArray : nil
+    }
+    if let scroller = objectField(listNode, "scroller") as? UIScrollView {
+        scroller.isAccessibilityElement = false
+        scroller.accessibilityElementsHidden = true
     }
     if let node = chatNode(chat) {
         if let panel = objectField(node, "inputNode"), let front = nodeView(panel), isModalNode(panel), visible(front, in: chat.view) {
