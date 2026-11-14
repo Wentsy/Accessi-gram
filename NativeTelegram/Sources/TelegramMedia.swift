@@ -140,10 +140,7 @@ struct MediaViewer: View {
                         TelegramVoicePlayer(url: localURL, description: message.body)
                             .accessibilityHidden(false)
                     default:
-                        VStack {
-                            Text(message.body)
-                            ShareLink(item: localURL) { Label("開啟或分享檔案", systemImage: "square.and.arrow.up") }
-                        }
+                        AccessibleDocumentViewer(url: localURL, description: message.body)
                     }
                 } else {
                     ProgressView("下載附件中")
