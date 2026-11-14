@@ -309,6 +309,16 @@ private func installChat() {
                 }
                 return pageHistory(history, direction: move, anchor: history.readingAnchor(direction))
             }
+            if UIAccessibility.isVoiceOverRunning,
+               direction == UIAccessibilityScrollDirection.next.rawValue ||
+               direction == UIAccessibilityScrollDirection.previous.rawValue {
+                // Read All passes next/previous, while Telegram's native list only
+                // recognizes up/down and otherwise treats both as up.
+                let translated = direction == UIAccessibilityScrollDirection.next.rawValue ?
+                    UIAccessibilityScrollDirection.down.rawValue :
+                    UIAccessibilityScrollDirection.up.rawValue
+                return original(view, scrollSel, translated)
+            }
             return original(view, scrollSel, direction)
         }
         replace(cls, "accessibilityScroll:", scroll, "B@:q")
@@ -1352,6 +1362,19 @@ private func installHistoryReading() {
                 let isReading = raw == UIAccessibilityScrollDirection.next.rawValue ||
                     raw == UIAccessibilityScrollDirection.previous.rawValue
                 return pageHistory(history, direction: direction, anchor: isReading ? view : nil)
+            }
+            if UIAccessibility.isVoiceOverRunning,
+               raw == UIAccessibilityScrollDirection.next.rawValue ||
+               raw == UIAccessibilityScrollDirection.previous.rawValue {
+                let nativeDirection: UIAccessibilityScrollDirection =
+                    raw == UIAccessibilityScrollDirection.next.rawValue ? .down : .up
+                if let backing = listBackingAncestor(of: view),
+                   HistoryViewport(backing) == nil {
+                    return backing.accessibilityScroll(nativeDirection)
+                }
+                if let scrollView = normalScrollAncestor(of: view) {
+                    return scrollView.accessibilityScroll(nativeDirection)
+                }
             }
             return oldScroll(view, scrollSel, raw)
         }
