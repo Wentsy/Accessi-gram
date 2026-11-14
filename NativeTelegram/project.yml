@@ -21,6 +21,7 @@ targets:
     sources:
       - Sources
       - Shared/ShareMailbox.swift
+      - Shared/ShareSessionBootstrap.swift
       - Resources/LaunchScreen.storyboard
     dependencies:
       - package: TDLibFramework
@@ -54,7 +55,12 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - ShareExtension/ShareViewController.swift
+      - ShareExtension/ExtensionTelegramSender.swift
       - Shared/ShareMailbox.swift
+      - Shared/ShareSessionBootstrap.swift
+    dependencies:
+      - package: TDLibFramework
+        product: TDLibFramework
     settings:
       base:
         SWIFT_VERSION: "5.0"
