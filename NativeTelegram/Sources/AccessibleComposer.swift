@@ -162,7 +162,14 @@ final class ComposerBarView: UIView, UITextViewDelegate {
 
     @objc private func openPhotos() { onPhotos?() }
     @objc private func openFiles() { onFiles?() }
-    @objc private func performAction() { onAction?() }
+    @objc private func performAction() {
+        // Only starting a voice note dismisses the keyboard. Sending text
+        // deliberately retains focus so consecutive text messages are easy.
+        if !recording && editor.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            editor.resignFirstResponder()
+        }
+        onAction?()
+    }
     @objc private func cancelRecording() { onCancelRecording?() }
 }
 
