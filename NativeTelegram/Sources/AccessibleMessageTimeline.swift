@@ -200,20 +200,13 @@ final class MessageTailRedirect: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isAccessibilityElement = true
-        accessibilityLabel = "傳送照片或影片"
-        accessibilityHint = "下一個操作是聊天輸入列"
+        accessibilityLabel = "聊天輸入列"
+        accessibilityHint = "繼續右滑可前往傳送照片、傳送檔案與訊息編輯框；點兩下直接跳到輸入列"
         accessibilityLanguage = "zh-TW"
         accessibilityTraits = .button
     }
 
     required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
-
-    override func accessibilityElementDidBecomeFocused() {
-        super.accessibilityElementDidBecomeFocused()
-        DispatchQueue.main.async {
-            ComposerBarView.active?.focusFirstAttachment()
-        }
-    }
 
     override func accessibilityActivate() -> Bool {
         ComposerBarView.active?.focusFirstAttachment()
@@ -296,8 +289,7 @@ final class MessageRow: UITableViewCell {
         // VoiceOver swipes from the composer into a message: dismiss
         // the keyboard without moving the current VoiceOver message focus.
         if UIAccessibility.isVoiceOverRunning {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                            to: nil, from: nil, for: nil)
+            ComposerBarView.active?.dismissKeyboardForReading()
         }
         onFocus?()
     }
