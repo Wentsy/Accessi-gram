@@ -48,14 +48,6 @@ final class ComposerBarView: UIView, UITextViewDelegate {
         }
     }
 
-    func insertBotCommand(_ command: String) {
-        editor.text = command.isEmpty ? "/" : command + " "
-        placeholder.isHidden = true
-        onTextChanged?(editor.text)
-        editor.becomeFirstResponder()
-        UIAccessibility.post(notification: .layoutChanged, argument: editor)
-    }
-
     var onTextChanged: ((String) -> Void)?
     var onPhotos: (() -> Void)?
     var onFiles: (() -> Void)?
@@ -89,7 +81,7 @@ final class ComposerBarView: UIView, UITextViewDelegate {
         files.accessibilityLabel = "傳送檔案或附件"
         files.accessibilityHint = "點兩下從檔案 App 選擇附件"
         commands.accessibilityLabel = "機器人斜線命令"
-        commands.accessibilityHint = "查看 BotFather 設定的斜線指令，選擇後填入訊息編輯框"
+        commands.accessibilityHint = "查看 BotFather 設定的斜線指令，點兩下選擇後立即送出，不需輸入文字"
         cancel.accessibilityLabel = "取消錄音"
         cancel.accessibilityHint = "放棄這段語音，不會傳送"
         for button in [photo, files, commands, action, cancel] {
