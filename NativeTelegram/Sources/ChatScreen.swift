@@ -12,16 +12,9 @@ struct ChatScreen: View {
     @State private var showFiles = false
     @State private var attachmentStatus = ""
     @State private var showPhotos = false
-    @State private var menuMessage: TelegramMessage?
-    @State private var showingMessageMenu = false
-    @State private var botMessage: TelegramMessage?
-    @State private var showingBotMenu = false
     @State private var mediaMessage: TelegramMessage?
     @State private var forwardMessage: TelegramMessage?
     @State private var showingForward = false
-    @State private var showingReactions = false
-    @State private var showingEdit = false
-    @State private var editedText = ""
 
     init(chatID: Int64) {
         self.chatID = chatID
@@ -37,16 +30,10 @@ struct ChatScreen: View {
             AccessibleMessageTimeline(
                 thread: thread,
                 service: service,
-                onMenu: { message in
-                    menuMessage = message
-                    showingMessageMenu = true
-                },
+                onMenu: { message in showMessageMenu(message) },
                 onReply: { message in thread.replyTo = message },
                 onMedia: { message in mediaMessage = message },
-                onBotMenu: { message in
-                    botMessage = message
-                    showingBotMenu = true
-                }
+                onBotMenu: { message in showBotMenu(message) }
             )
             if thread.loading && thread.messages.isEmpty {
                 ProgressView("載入訊息中")
@@ -69,50 +56,6 @@ struct ChatScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { service.open(chatID) }
         .onDisappear { service.close(chatID) }
-        .sheet(isPresented: $showingMessageMenu) {
-            if let message = menuMessage {
-                AccessibleChoiceSheet(title: "訊息操作", choices: messageMenuChoices(message)) { id in
-                    performMessageAction(id, for: message)
-                }
-                .presentationDetents([.medium, .large])
-            }
-        }
-        .sheet(isPresented: $showingBotMenu) {
-            if let message = botMessage ?? keyboardMessage {
-                AccessibleChoiceSheet(
-                    title: "機器人互動選單",
-                    choices: (message.buttons + message.keyboardButtons).map {
-                        AccessibleMenuChoice($0.id, $0.title)
-                    }
-                ) { id in
-                    if let button = (message.buttons + message.keyboardButtons)
-                        .first(where: { $0.id == id }) {
-                        service.botAction(button, message: message)
-                    }
-                }
-                .presentationDetents([.medium, .large])
-            }
-        }
-        .sheet(isPresented: $showingReactions) {
-            if let message = menuMessage {
-                AccessibleChoiceSheet(
-                    title: "選擇表情回應",
-                    choices: ["👍", "❤️", "😂", "🎉", "😮", "🙏"].map {
-                        AccessibleMenuChoice($0, "回應 \($0)")
-                    }
-                ) { emoji in
-                    service.react(message, emoji: emoji)
-                }
-                .presentationDetents([.medium])
-            }
-        }
-        .alert("編輯訊息", isPresented: $showingEdit) {
-            TextField("訊息", text: $editedText)
-            Button("儲存") {
-                if let message = menuMessage { service.edit(message, newText: editedText) }
-            }
-            Button("取消", role: .cancel) {}
-        }
         .sheet(item: $mediaMessage) { message in
             MediaViewer(message: message, service: service, recorder: voice)
         }
@@ -133,7 +76,7 @@ struct ChatScreen: View {
                                 let local = try await AttachmentPreparation.copyFromFiles(url)
                                 service.sendMedia(chatID: chatID, fileURL: local, kind: "document")
                                 UIAccessibility.post(notification: .announcement,
-                                                     argument: "已提交 \(url.lastPathComponent) 至 Telegram")
+                                                     argument: "正在傳送 \(url.lastPathComponent)")
                             } catch {
                                 let reason = "無法傳送 \(url.lastPathComponent)：\(error.localizedDescription)"
                                 service.errorMessage = reason
@@ -198,6 +141,32 @@ struct ChatScreen: View {
         return choices
     }
 
+    private func showMessageMenu(_ message: TelegramMessage) {
+        AccessibleSystemMenu.present(title: "訊息操作",
+            choices: messageMenuChoices(message)) { id in
+            performMessageAction(id, for: message)
+        }
+    }
+
+    private func showBotMenu(_ message: TelegramMessage) {
+        let items = message.buttons + message.keyboardButtons
+        AccessibleSystemMenu.present(title: "機器人互動選單",
+            choices: items.map { AccessibleMenuChoice($0.id, $0.title) }) { id in
+            if let button = items.first(where: { $0.id == id }) {
+                service.botAction(button, message: message)
+            }
+        }
+    }
+
+    private func showReactionMenu(_ message: TelegramMessage) {
+        AccessibleSystemMenu.present(title: "選擇表情回應",
+            choices: ["👍", "❤️", "😂", "🎉", "😮", "🙏"].map {
+                AccessibleMenuChoice($0, "回應 \($0)")
+            }) { emoji in
+            service.react(message, emoji: emoji)
+        }
+    }
+
     private func performMessageAction(_ id: String, for message: TelegramMessage) {
         switch id {
         case "translate":
@@ -208,20 +177,21 @@ struct ChatScreen: View {
             UIPasteboard.general.string = message.body
             UIAccessibility.post(notification: .announcement, argument: "訊息已複製")
         case "open", "bot", "react", "forward", "edit":
-            // Present the next modal only after the menu finishes dismissing.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 switch id {
-                case "open": mediaMessage = message
+                case "open":
+                    mediaMessage = message
                 case "bot":
-                    botMessage = message
-                    showingBotMenu = true
-                case "react": showingReactions = true
+                    showBotMenu(message)
+                case "react":
+                    showReactionMenu(message)
                 case "forward":
                     forwardMessage = message
                     showingForward = true
                 case "edit":
-                    editedText = message.body
-                    showingEdit = true
+                    AccessibleSystemMenu.editMessage(initial: message.body) { newText in
+                        service.edit(message, newText: newText)
+                    }
                 default: break
                 }
             }
@@ -254,8 +224,7 @@ struct ChatScreen: View {
             )
             if keyboardMessage != nil {
                 Button("展開機器人鍵盤") {
-                    botMessage = keyboardMessage
-                    showingBotMenu = true
+                    if let keyboardMessage { showBotMenu(keyboardMessage) }
                 }
                 .accessibilityLabel("展開機器人互動選單")
                 .accessibilityHint("點兩下選擇機器人提供的選項")
