@@ -70,3 +70,23 @@ bash scripts/build.sh
 ## 交付狀態
 
 本輪僅將**完整原始碼提交到分支**，沒有在此執行 Xcode 編譯、回歸／防禦型測試或 iOS 18.7.8 真機驗證。由 OC 拉取此分支最新提交接手編譯與簽署；若需修正編譯錯誤，維持以上行為與登錄資料不變。不得把「原始碼已提交」表述成「真機已確認功能正常」。
+
+## 2026-11-15：分享登入輸入手機後發生 API_ID_INVALID（最新修正）
+
+**根因與界線：** 這是 Telegram `auth.sendCode` 驗證分享 Extension 當前使用的 `api_id`／`api_hash` 失敗，不是手機號碼格式錯誤。分享端與主 App 分別有自己的資料庫和 API 設定；主 App 過去已登入不代表 Share Extension 一定獲得同一組 API 金鑰。若打包未注入兩個 target 的 Info.plist，分享端要求首次手動輸入 API ID／Hash，可能造成打錯或使用過時值。TDLib `setTdlibParameters` 接受輸入並進入手機號碼頁，不代表遠端已驗證該組 API；直到 `setAuthenticationPhoneNumber` 才可能收到 `API_ID_INVALID`。
+
+**這次程式修復：**
+
+- `ExtensionTelegramSender.query()` 對 `API_ID_INVALID`／`CONNECTION_API_ID_INVALID` 顯示具體的 API 憑證錯誤、切回 `.apiCredentials` 而不是把它描述成普通訊息傳送失敗；TDLib 參數設定階段也保留此提示。
+- `ShareLoginController` 在手機／驗證碼／密碼／電子郵件／QR 登入頁新增「修改分享功能的 API ID／Hash」，VoiceOver 可直接找到；錯誤時會顯示 API 編輯框。
+- `ExtensionTelegramSender.saveAPI` 更換已套用的 API 憑證前會先呼叫 `close` 等待分享 TDLib client 完全關閉，才清除**僅分享 Extension 沙盒內的資料庫、設定檔、加密金鑰**並重新以新憑證啟動。主 App `org.accessigram.native` 的 Keychain 和 TDLib 資料庫完全不動。若這個擴充功能先前已成功登入，手動更換 API 會需要重新登入分享端。
+- API Hash 輸入欄位設為安全文字，輸入時檢查 API ID 大於零且 Hash 為 32 位十六進位；這只能篩除格式錯誤，真正的值仍必須由 Telegram 驗證。
+
+**OC 建置交付重點：**
+
+- 確認 GitHub Actions 真正有執行 `NativeTelegram/scripts/build.sh` 並傳入有效的 `TELEGRAM_API_ID` 和 `TELEGRAM_API_HASH` 環境變數。主 App 既存的 Keychain 無法自動複製給 Share Extension（因為小白簽不支援當前 App Groups 權限），因此不能假設分享端會知道主 App 的 API Hash。
+- 打包後**只核對**主 App 與 `PlugIns/AccessiGramShareExtension.appex` 各自 Info.plist 是否都有相同的 `TelegramAPIID`，並確認 `TelegramAPIHash` 存在且為 32 位；不要在 CI 日誌印出真正的 API Hash，不要提交任何憑證到公開 GitHub。
+- 只有使用者的 API ID／Hash 真正有效才能取得 Telegram 登入驗證碼。若 OC 不能向兩個 Info.plist 注入正確值，讓使用者在分享視窗透過 [Telegram API Development Tools](https://my.telegram.org/apps) 輸入自己的正確 API ID／Hash，**不需要提供手機密碼或 API Hash 給 ChatGPT**。
+- 即使打包後改正 Info.plist，先前儲存在分享沙盒的舊 API 憑證仍會優先使用；使用者可利用本次新增的「修改分享功能的 API ID／Hash」覆蓋舊值，無須刪除 App 或重新登入主程式。
+
+本輪只提交原始碼，不在此執行 Xcode 編譯／回歸測試；請由 OC 拉取最新提交接手。原有主 App Bundle ID、Keychain 和登入不能更動。
