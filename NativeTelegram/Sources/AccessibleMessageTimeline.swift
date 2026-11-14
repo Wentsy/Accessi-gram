@@ -249,9 +249,11 @@ final class MessageRow: UITableViewCell {
         content.text = "\(message.sender)\n\(message.body)\n\(TelegramMessage.timestamp.string(from: message.date))"
         accessibilityLabel = message.spoken
         accessibilityLanguage = "zh-TW"
-        accessibilityHint = (message.fileKind == "voice" || message.fileKind == "audio")
+        accessibilityHint = (message.fileKind == "voice")
             ? "點兩下播放語音訊息；上下滑動可選擇其他操作"
-            : "上下滑動選擇翻譯、回覆或其他操作，點兩下開啟訊息選單"
+            : message.fileKind == "audio"
+                ? "點兩下播放音訊；上下滑動可選擇其他操作"
+                : "上下滑動選擇翻譯、回覆或其他操作，點兩下開啟訊息選單"
         self.onActivate = (message.fileKind == "voice" || message.fileKind == "audio")
             ? onMedia : onActivate
         var actions = [
