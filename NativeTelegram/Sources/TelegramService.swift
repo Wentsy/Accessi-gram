@@ -376,7 +376,10 @@ final class TelegramService: ObservableObject {
         command("checkAuthenticationEmailCode", ["code": ["@type": "emailAddressAuthenticationCode", "code": code]])
     }
     func startQR() { command("requestQrCodeAuthentication", ["other_user_ids": []]) }
-    func logOut() { command("logOut") }
+    func logOut() {
+        ShareSessionBootstrap.clearAuthorization()
+        command("logOut")
+    }
 
     func loadChats() {
         guard authStage == .ready, !loadingChats else { return }
