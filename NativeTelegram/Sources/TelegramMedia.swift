@@ -137,11 +137,8 @@ struct MediaViewer: View {
                     case "video":
                         AccessibleVideoPlayer(url: localURL)
                     case "voice", "audio":
-                        AccessibleAudioPlayback(
-                            description: message.body,
-                            url: localURL,
-                            recorder: recorder
-                        )
+                        TelegramVoicePlayer(url: localURL, description: message.body)
+                            .accessibilityHidden(false)
                     default:
                         VStack {
                             Text(message.body)
