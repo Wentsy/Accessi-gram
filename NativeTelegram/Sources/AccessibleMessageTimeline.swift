@@ -258,6 +258,12 @@ final class MessageRow: UITableViewCell {
 
     override func accessibilityElementDidBecomeFocused() {
         super.accessibilityElementDidBecomeFocused()
+        // VoiceOver swipes from the composer into a message: dismiss
+        // the keyboard without moving the current VoiceOver message focus.
+        if UIAccessibility.isVoiceOverRunning {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                            to: nil, from: nil, for: nil)
+        }
         onFocus?()
     }
 
