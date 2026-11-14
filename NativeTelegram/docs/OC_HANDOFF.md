@@ -87,3 +87,17 @@ TELEGRAM_API_ID="$MY_TG_API_ID" TELEGRAM_API_HASH="$MY_TG_API_HASH" bash scripts
 - 已移除沒有使用的舊 SwiftUI 聊天、設定介面，也清掉先前硬編入公開原始碼的 API 預設值。免輸入 API 請沿用 build.sh 使用私有環境變數注入 Info.plist。**不應再把真實 API Hash 提交到公開倉庫。**
 
 給 OC：拉取 rewrite/native-tdlib-voiceover 最新提交後編譯，使用與原版相同的 Bundle ID、Keychain 權限和 TDLib 資料庫路徑覆蓋安裝。這次未在此環境執行 Xcode／真機測試。更新後聊天輸入列從左至右應能讀到：「傳送照片或影片」、「傳送檔案或附件」、「訊息編輯框」、「開始錄製語音訊息」或「傳送文字訊息」。錄音時應有「停止錄音並傳送語音訊息」及「取消錄音」。
+
+
+## 2026-11-14：附件無法傳送／新訊息震動修正
+
+使用者回報語音錄製完成後彈出 `InputFile is not specified`，照片及影片無法傳送，「檔案」App 選完按「打開」後沒有任何反應。本次同步修正並加入前景震動：
+
+- TDLibFramework 現行依賴為 TDLib 1.8.70；TDLib 1.8.65 之後的媒體內容參數已改成 `inputPhoto` / `inputVideo` / `inputVoiceNote` / `inputDocument` 中再放 `inputFileLocal`。原本直接放 `inputFileLocal` 會讓資料解析後找不到實際檔案。修正 `TelegramService.sendMedia` 全類別封裝，訊息仍透過官方 `sendMessage` 傳送。
+- `AttachmentPreparation.swift`：PhotosPicker 圖片轉換成真實 JPEG 路徑，避免 HEIC 檔案內容配上錯誤 .jpg 副檔名；影片透過 AVFoundation 匯出 MP4；iOS Files / iCloud / 檔案提供者 URL 先用 NSFileCoordinator 與 security scope 複製到 App 私有暫存位置，並保留原始文件名稱後傳送為一般檔案。
+- `VoiceRecorder` 新增實際錄音秒數 `lastDuration`，傳給 `inputVoiceNote.duration`。原生 M4A AAC 語音若無法當作 Telegram 語音泡泡，送出要求回傳可辨識的語音格式錯誤時改為一般音訊附件；**完整一致的 OGG Opus 語音泡泡仍需額外 Opus 編碼器**。
+- 檔案準備錯誤和 TDLib 的 `sendMessage`／`updateMessageSendFailed` 錯誤現在會顯示原因，不再「點打開沒反應」。VoiceOver 在 TDLib 接受要求後才播報「已提交附件，正在傳送」，不會把錄音停止誤報成傳送成功。
+- `TelegramService` 在 `updateNewMessage` 判斷 **App 前景、非自己發送、真實新進訊息** 時使用 iPhone 系統震動；用訊息 ID 排除重複更新、限制短時間連續震動；歷史分頁和開機同步不會觸發。
+- `AccessibleSettingsController` 新增 **App 開啟時新訊息震動** 可調整選項，預設開啟，值以 UserDefaults 儲存，可在 VoiceOver 直接點擊開關。
+
+OC 請拉取同一分支 `rewrite/native-tdlib-voiceover` 的最新提交重新打包，直接覆蓋安裝，沿用 Bundle ID、Keychain 與 TDLib 資料庫。修正沒有改登入流程。依使用者要求，此處只提交原始碼，不進行回歸測試；OC 可依實際 iOS 編譯結果接手。注意所有 iPhone / iOS 設備震動行為仍受系統觸覺設定限制。
