@@ -228,6 +228,8 @@ private func installEscape() {
 private final class ChatState: NSObject {
     var pendingLatest = true
     var actionsInstalled = false
+    weak var lastMessageFocus: UIView?
+    var readingDirection: HistoryDirection?
 }
 private var chatStateKey: UInt8 = 0
 private func state(_ controller: UIViewController) -> ChatState {
@@ -861,15 +863,33 @@ private func prepareReadingEdge(_ element: UIView, history: HistoryViewport) {
     let rows = history.messages()
     guard rows.count >= 2,
           let index = rows.firstIndex(where: { $0.element === element }) else { return }
+    let tracking = state(history.chat)
+    let previous = tracking.lastMessageFocus.flatMap { old in
+        rows.firstIndex { $0.element === old }
+    }
     let direction: HistoryDirection
-    let edge: UIView
-    if index <= 1 {
+    if let previous, previous != index {
+        direction = index < previous ? .older : .newer
+        tracking.readingDirection = direction
+    } else if let last = tracking.readingDirection {
+        direction = last
+    } else if index == 0 {
         direction = .older
-        edge = rows[0].element
-    } else if index >= rows.count - 2 {
+    } else if index == rows.count - 1 {
         direction = .newer
+    } else {
+        tracking.lastMessageFocus = element
+        return
+    }
+    tracking.lastMessageFocus = element
+    let edge: UIView
+    if direction == .older {
+        guard index <= 1 else { return }
+        edge = rows[0].element
+    } else {
+        guard index >= rows.count - 2 else { return }
         edge = rows[rows.count - 1].element
-    } else { return }
+    }
     if let next = history.adjacent(to: edge, direction: direction),
        next.frame.intersection(history.bounds).height >= min(64, next.frame.height) { return }
     _ = history.prepareAdjacent(to: edge, direction: direction, preserving: element)
