@@ -200,7 +200,9 @@ final class MessageRow: UITableViewCell {
         super.init(style: .default, reuseIdentifier: reuseIdentifier)
         selectionStyle = .none
         isAccessibilityElement = true
+        accessibilityLanguage = "zh-TW"
         accessibilityTraits = [.staticText]
+        content.isAccessibilityElement = false
         content.translatesAutoresizingMaskIntoConstraints = false
         content.numberOfLines = 0
         content.font = UIFont.preferredFont(forTextStyle: .body)
@@ -228,6 +230,7 @@ final class MessageRow: UITableViewCell {
     ) {
         content.text = "\(message.sender)\n\(message.body)\n\(TelegramMessage.timestamp.string(from: message.date))"
         accessibilityLabel = message.spoken
+        accessibilityLanguage = "zh-TW"
         accessibilityHint = "上下滑動選擇翻譯、回覆或其他操作，點兩下開啟訊息選單"
         self.onFocus = onFocus
         self.onActivate = onActivate
