@@ -19,7 +19,7 @@ targets:
         product: TDLibFramework
     settings:
       base:
-        SWIFT_VERSION: "5.9"
+        SWIFT_VERSION: "5.0"
         PRODUCT_BUNDLE_IDENTIFIER: org.accessigram.native
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
