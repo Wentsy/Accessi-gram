@@ -125,11 +125,20 @@ OC 請拉取同一分支 `rewrite/native-tdlib-voiceover` 的最新提交重新�
 
 一般文件改用 AccessibleDocumentViewer.swift，具有原生 UIKit「預覽檔案」（Quick Look）、「使用其他 App 開啟或分享檔案」，避免下載後陷入沒有可朗讀內容的 SwiftUI 檔案頁。
 
-### 3. 真正的 iOS Share Extension
+### 3. iOS Share Extension 直接傳送（更新：不必再開啟主 App）
 
-新增 AccessiGramShareExtension target（.appex），ShareExtension/ShareViewController.swift、Shared/ShareMailbox.swift。從其他 App 叫出系統分享選單可開啟 Accessi Gram 分享視窗，在視窗內搜尋私聊／群組／聯絡人，輸入說明文字並確認分享。App 將最近聊天和聯絡人清單同步到 App Group 容器；Share Extension 把檔案和說明文字安全寫入共用容器佇列；**再次開啟 Accessi Gram 時會自動送出**，不再只有進入主程式卻不選收件人。
+已改掉前一版「暫存後等待使用者手動開主 App」的流程。使用者從任何 App 選擇分享 → Accessi Gram → 選收件人／群組 → 輸入說明 → 傳送，**由 Share Extension 本身直接使用 TDLib 上傳**。程式會等到 Telegram 的 updateMessageSendSucceeded 才完成分享視窗；失敗會顯示原因及「重新傳送」按鈕，部分已傳送的附件重試時不會重複傳送。絕不把「已加入本地佇列」當作傳送成功。
 
-**iOS 限制：** Apple 不允許一般 Share Extension 使用未公開 API 強制啟動主 App，因此這個版本採用官方支援的「選收件人 → 暫存 → 開啟 App 自動送出」流程，而不是保證 Share Extension 在背景就直接以使用者帳號送出。分享對話框必須清楚告知「請開啟 Accessi Gram 後完成傳送」，不可顯示「已成功傳送」假訊息。Share Extension 不重複登入 TDLib，不共用 TDLib 資料庫句柄，避免破壞主 App 的登入。
+實作：
+- Shared/ShareSessionBootstrap.swift：主 App 在首次啟動 TDLib 以前，將既有已登入的 TDLib 資料庫複製到 App Group 下獨立的 share-tdlib。API ID／Hash 及 TDLib 資料庫解密金鑰存放在受 iOS 檔案保護、僅 App Group 成員可存取的 share-session.json。
+- ShareExtension/ExtensionTelegramSender.swift：分享端用另一個 TDLib client 及獨立的 share-tdlib 資料庫連線，依據收件人 ID 用 sendMessage 發送文字、圖片、影片與文件，等待後續傳送成功／失敗更新；不與主 App 同時打開相同 SQLite 目錄，也無須再次輸入帳密。已加入失敗重試時不重覆傳送已完成附件的處理。
+- ShareExtension/ShareViewController.swift：選擇收件人、輸入說明、準備媒體後，直接 await ExtensionTelegramSender.send；只有 Telegram 回報送出才關閉分享視窗。僅附件在傳送過程會暫存至 App Group，確認成功後清掉。
+- NativeTelegram/project.yml：Share Extension 已直接依賴 TDLibFramework 與共用的 ShareSessionBootstrap；打包時要確保 .appex 可連結 TDLib 的 XCFramework、保留 App Groups entitlements。
+- TelegramService.logOut() 現在會清除分享專用登入副本，避免原帳號登出後 Extension 還能沿用舊授權。
+
+**重要：OC 安裝／首次啟動順序**：保留原有 Bundle ID、Keychain、ApplicationSupport/tdlib；用具備 App Groups 的新版簽署設定覆蓋安裝。**更新後開啟 Accessi Gram 一次**，讓 App 在打開已登入 TDLib 前備妥分享專用授權副本。此後從其他 App 分享**無須再打開 Accessi Gram**。若是全新安裝，必須登入、完整關閉並再打開一次，供主 App 建立分享用資料庫快照。若副本未就緒或授權失效，分享端會明確顯示錯誤，不會默默留在佇列。
+
+Apple 的 Share Extension 可以直接進行網路傳輸，但無法保證主 App 會由分享視窗強制啟動。本版不依靠強制啟動；傳送時需維持分享視窗開啟，**大檔上傳受 iOS Extension 生命周期／資源上限影響，不保證 App 關閉後長時間持續上傳**。App Group 中的授權副本需視同 Telegram 登入敏感資料保護，不可備份或提交公開 GitHub。
 
 ### 4. VoiceOver 選單與鍵盤收合
 
@@ -154,3 +163,8 @@ bash scripts/build.sh
 上述 YES 僅適用開發型 APNs 描述檔，生產簽名須改用 NO，並讓 App.entitlements 的 aps-environment 與描述檔一致。此腳本提供**未簽名 IPA**，**不會自動申請 APNs 金鑰、不會向 Telegram 註冊服務端憑證、也不會替 OC 建立 Apple App Groups 能力**。IPA 內需有 PlugIns/AccessiGramShareExtension.appex。維持 main Bundle ID、Keychain、TDLib 路徑不變；請勿讓簽名或 app group 設定改變既有帳號容器。App 與 extension 的 CFBundleVersion 已由 CURRENT_PROJECT_VERSION 控制，OC 可照原有流程自動遞增，不需把尾碼寫死。
 
 **狀態：** 原始碼已提交，但此環境未執行 Xcode 編譯及真機檢查，因此語音播放、背景 APNs、Share Extension 與全螢幕修正不能宣稱已實測成功。由 OC 拉取最新提交後依 Apple 簽署能力和 Telegram 憑證進行打包。
+
+
+### 2026-11-14 最新覆蓋說明：直接分享已取代舊版暫存流程
+
+舊版文件與說明中「分享後要再手動打開 App」「分享成功僅代表暫存」已作廢。OC 應以此段及上方最新版第 3 節為準。此修改與上個尚未測試版本的 APNs、OGG/Opus 語音播放器、UIKit 選單、鍵盤收合、LaunchScreen 全螢幕修復一起留在 **rewrite/native-tdlib-voiceover**。請一次拉取分支最新提交打包，不需要中間版本。此環境沒有 Xcode／實機環境，不能把程式碼提交等同確認真機送出成功。
