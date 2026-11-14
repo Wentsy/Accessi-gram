@@ -1469,9 +1469,15 @@ private func browserButtonLabel(_ object: NSObject) -> String? {
     for image in descendants(view) where className(image) == "_TtCC19BundleIconComponent19BundleIconComponent4View" {
         guard let component = field(image, "component"), let icon = field(component, "name") as? String else { continue }
         switch icon {
-        case "Navigation/Close", "Instant View/Close": return "關閉"
-        case "Instant View/Back": return "返回上一頁"
-        case "Instant View/Forward": return "前往下一頁"
+        case "Navigation/Close", "Instant View/Close", "Navigation/Dismiss": return "關閉"
+        case "Navigation/Back", "Instant View/Back": return "返回上一頁"
+        case "Navigation/Forward", "Instant View/Forward": return "前往下一頁"
+        case "Navigation/More", "Navigation/MoreCircle": return "更多選項"
+        case "Navigation/Search": return "搜尋"
+        case "Navigation/Check", "Navigation/Done": return "確認"
+        case "Navigation/Cancel": return "取消"
+        case "Chat/Delete": return "刪除"
+        case "Chat/Attach": return "附件"
         default: continue
         }
     }
@@ -1536,6 +1542,29 @@ private func installSupplementalControls() {
     installButton("_TtC15ShareController21ShareActionButtonNode", action: {
         nearestNode(nodeView($0), matching: "_TtC15ShareController19ShareControllerNode").map { send($0, "actionButtonPressed") } ?? false
     }, label: { text(field($0, "badgeLabel")) ?? "分享" })
+    // Frequently reused confirmation and toolbar buttons outside chat screens.
+    installButton("_TtC22SolidRoundedButtonNode22SolidRoundedButtonNode",
+                  action: { field($0, "isEnabled") as? Bool != false && invoke($0, "pressed") },
+                  label: { object in
+                      [field(object, "title") as? String, field(object, "subtitle") as? String]
+                          .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "，")
+                  })
+    installButton("_TtC22SolidRoundedButtonNode22SolidRoundedButtonView",
+                  action: { field($0, "isEnabled") as? Bool != false && invoke($0, "pressed") },
+                  label: { object in
+                      [field(object, "label") as? String ?? field(object, "title") as? String,
+                       field(object, "subtitle") as? String]
+                          .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "，")
+                  })
+    installButton("_TtC14MoreButtonNode14MoreButtonNode",
+                  action: { send($0, "buttonPressed") },
+                  label: { object in
+                      switch enumCase(field(objectField(object, "iconNode") as Any, "iconState")) {
+                      case "search": return "搜尋"
+                      case "more": return "更多選項"
+                      default: return "更多選項"
+                      }
+                  })
     installButton("_TtC10TelegramUI31ChatHistoryNavigationButtonNode", action: {
         field($0, "isEnabled") as? Bool != false && invoke($0, "tapped")
     }, label: { object in
