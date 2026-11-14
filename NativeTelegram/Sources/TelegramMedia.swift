@@ -162,7 +162,7 @@ struct MediaViewer: View {
             .navigationTitle("附件")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("關閉") { dismiss() } }
+                ToolbarItem(placement: .navigationBarTrailing) { Button("關閉") { dismiss() } }
                 if let localURL {
                     ToolbarItem(placement: .bottomBar) { ShareLink(item: localURL) { Text("分享附件") } }
                 }
