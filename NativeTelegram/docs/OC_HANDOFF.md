@@ -173,3 +173,38 @@ bash scripts/build.sh
 6. **不改登入**：保留原本的主 App Bundle ID、Keychain、TDLib database 路徑與已登入帳號；OC 直接更新同一分支最新 commit 覆蓋安裝。Share Extension 仍需要和主 App 同一 Team 的 App Groups entitlement，但不需要任何私人推播伺服器。
 
 依使用者指示，此處只提交原始碼給 OC，沒有做 Xcode 編譯或回歸／防禦性測試，不得以本次提交宣稱 iOS 18.7.8 實機已驗證。主分支 main 未動。
+
+## 2026-11-15：分享登入根因、焦點回跳、BotFather 快捷指令與音檔
+
+此段內容優先於上方舊版本說明。仍沿用 rewrite/native-tdlib-voiceover，不動 main。
+
+### 跨 App 分享失敗的可觀察根因
+
+舊版只在 TelegramService.connect() 啟動主 TDLib 前嘗試一次建立分享用登入副本。初次登入時 ApplicationSupport/tdlib 可能尚未建立，流程便跳過；登入完成後沒有再建立。另一個關鍵是 OC 簽署後若沒有正確 App Groups 權限，iOS 無法開啟 group.org.accessigram.native 的共用容器。更糟的是 ExtensionTelegramSender 原本捕捉所有錯誤後一律轉成「尚未取得 Telegram 登入資料」，把缺少 entitlement 等真正原因遮蓋了。
+
+現在 ShareSessionBootstrap 回報不同原因：缺少 App Group 權限、主 TDLib 資料庫不存在、複製失敗、設定檔未建立；ExtensionTelegramSender 保留原始錯誤，不再改成相同的提示。主 App 在授權狀態為 ready 時也會補建副本，設定 → 聊天資料增加「重新建立分享登入」並顯示具體狀態。主 App 仍會在下次冷啟動 TDLib 之前檢查副本。分享端仍自行查詢最近聊天並直接傳送，無需每次開啟主 App。
+
+OC 必須確認主 App 和 Share Extension 的簽名具有相同 App Group 權限；這不是 APNs，不用推播伺服器，但不能靠 App 自己繞過 iOS 權限。可在打包好的 Payload 目錄執行：
+
+```sh
+codesign -d --entitlements :- Payload/AccessiGramNative.app
+codesign -d --entitlements :- Payload/AccessiGramNative.app/PlugIns/AccessiGramShareExtension.appex
+```
+
+兩份簽名的 entitlements 都必須包含 com.apple.security.application-groups 的 group.org.accessigram.native；Provisioning Profile 也要允許。不要刪除原 App 或更換原 Bundle ID，免得丟失 TDLib 登入和 Keychain。分享用副本包含登入權杖及加密金鑰，禁止輸出到日誌或公開倉庫。若 OC 的簽署方案不支援 App Groups，必須如實回報，不能宣稱已修復。
+
+### VoiceOver 焦點回跳
+
+MessageTailRedirect 以前在 accessibilityElementDidBecomeFocused 每次呼叫 UIAccessibility.post(.layoutChanged)，強制將旁白焦點送回照片按鈕，導致反向滑動時反覆跳到編輯區。現已刪除自動轉移，只有使用者明確點兩下尾端標記才跳到輸入列；平常依原生左右滑順序瀏覽。MessageRow 聚焦時也不再額外呼叫載入更舊訊息，避免讀取造成畫面重排；鍵盤只有當編輯框仍為第一響應者時才收合。原生訊息選單不再手動發送 screenChanged 通知，使 UIKit 自行管理焦點。
+
+### BotFather 的斜線命令：選完立即送出，不經編輯框
+
+這和機器人訊息本身的 inline/reply keyboard 完全不同，兩套介面都保留。在聊天室照片、檔案旁新增「機器人斜線命令」按鈕，透過 TelegramService.botSlashCommands 取得私聊 getUserFullInfo.bot_info.commands 或群組 FullInfo.bot_commands，顯示斜線指令與說明。選擇命令後 ChatScreen 直接呼叫 TelegramService.sendText(chatID:text:) 傳送 /指令，VoiceOver 宣告提交中；**不會填入編輯框，不要求再按傳送**。若機器人沒有配置命令則顯示提示，不捏造指令。
+
+### MP3、M4A 等音訊一點就播
+
+Telegram 的 MP3 可能是 messageDocument，而不是 messageAudio。TelegramMessage 現已對文件副檔名 mp3/m4a/aac/wav/aiff/caf/ogg/opus/flac 做 audio 分類，訊息點兩下會直接走 AccessibleMediaSheet → VoicePlayerController，不再先開一般文件預覽。播放格式是否能真正解碼仍以 iOS AVAudioPlayer 或 Opus 解碼器為準。
+
+### 交付
+
+只需讓 OC 拉取 rewrite/native-tdlib-voiceover 的最新提交一次打包，保留原 Bundle ID、Keychain、TDLib 資料庫及 App Groups 權限。背景 APNs 已完全取消。本環境未執行 Xcode 編譯或 iOS 18.7.8 真機測試，不能把已提交當成實測成功。
