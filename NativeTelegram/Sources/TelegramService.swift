@@ -90,6 +90,8 @@ final class TelegramService: ObservableObject {
     @Published var moreChatsAvailable = true
     @Published var passwordHint = ""
     @Published var contacts: [TelegramContact] = []
+    @Published var systemNotificationStatus = "尚未取得通知權限"
+    @Published var notificationChatID: Int64?
     @Published var foregroundVibrationEnabled =
         UserDefaults.standard.object(forKey: "foregroundMessageVibration") as? Bool ?? true {
         didSet {
@@ -113,6 +115,8 @@ final class TelegramService: ObservableObject {
     private var alreadyVibrated = Set<String>()
     private var recentVibrationIDs: [String] = []
     private var lastVibration = Date.distantPast
+    private var currentPushToken = ""
+    private var registeredPushToken = ""
 
     private init() {}
 
@@ -285,10 +289,53 @@ final class TelegramService: ObservableObject {
                 alreadyVibrated.removeAll()
                 recentVibrationIDs.removeAll()
                 chatSyncStatus = "正在同步 Telegram 對話與群組"
+                SystemNotificationManager.shared.refreshAuthorizationStatus()
+                registerPendingPushToken()
                 loadChats()
             }
         case "authorizationStateLoggingOut", "authorizationStateClosed": authStage = .phone
         default: authStage = .unknown
+        }
+    }
+
+    func registerPushToken(_ token: String) {
+        currentPushToken = token
+        registerPendingPushToken()
+    }
+
+    private func registerPendingPushToken() {
+        guard authStage == .ready, !currentPushToken.isEmpty,
+              registeredPushToken != currentPushToken else { return }
+
+        // OC must match this to the APS environment of the provisioning
+        // profile. Debug/dev tokens must use sandbox; TestFlight/production do not.
+        let sandbox = Bundle.main.object(forInfoDictionaryKey: "TelegramAPNsIsSandbox") as? Bool ?? false
+        request("registerDevice", [
+            "device_token": [
+                "@type": "deviceTokenApplePush",
+                "device_token": currentPushToken,
+                "is_app_sandbox": sandbox
+            ] as JSONObject,
+            "other_user_ids": [] as [Int64]
+        ]) { [weak self] result in
+            guard let self else { return }
+            if result.text("@type") == "pushReceiverId" {
+                self.registeredPushToken = self.currentPushToken
+                self.systemNotificationStatus = "iOS 通知已授權，Telegram 推播裝置已註冊"
+            } else if result.text("@type") == "error" {
+                self.systemNotificationStatus =
+                    "Telegram 推播註冊失敗：\(result.text("message"))"
+            }
+        }
+    }
+
+    func processPush(_ userInfo: JSONObject, completion: @escaping (Bool) -> Void) {
+        if clientID == 0 { start() }
+        let data = try! JSONSerialization.data(withJSONObject: userInfo)
+        request("processPushNotification", [
+            "payload": String(decoding: data, as: UTF8.self)
+        ]) { response in
+            completion(response.text("@type") != "error")
         }
     }
 
