@@ -47,6 +47,7 @@ final class ExtensionTelegramSender {
     private var configuration: ShareSessionConfiguration?
     private var awaitingMessages: [Int64: CheckedContinuation<Void, Error>] = [:]
     private var completedMessages: [Int64: Result<Void, Error>] = [:]
+    private var deliveredShareItems: [String: Set<Int>] = [:]
 
     func connect() async throws {
         if authReady { return }
@@ -263,6 +264,7 @@ final class ExtensionTelegramSender {
         let chatID = try await targetChatID(share.target)
 
         if share.attachments.isEmpty {
+            guard deliveredShareItems[share.id]?.contains(-1) != true else { return }
             let content: TDJSON = [
                 "@type": "inputMessageText",
                 "text": [
@@ -275,10 +277,14 @@ final class ExtensionTelegramSender {
             ]
             progress("正在傳送文字")
             try await deliver(chatID: chatID, content: content)
+            deliveredShareItems[share.id, default: []].insert(-1)
             return
         }
 
         for (index, item) in share.attachments.enumerated() {
+            // A retry after a partial upload must not duplicate successful
+            // attachments from the same share sheet session.
+            if deliveredShareItems[share.id]?.contains(index) == true { continue }
             guard let file = ShareMailbox.url(for: item) else {
                 throw ShareSendError.failed("附件路徑已失效")
             }
@@ -286,6 +292,7 @@ final class ExtensionTelegramSender {
             let caption = index == 0 ? share.caption : ""
             let content = messageContent(item, at: file, caption: caption)
             try await deliver(chatID: chatID, content: content)
+            deliveredShareItems[share.id, default: []].insert(index)
         }
     }
 }
