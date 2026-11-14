@@ -45,7 +45,6 @@ struct ChatScreen: View {
                     showingBotMenu = true
                 }
             )
-            .accessibilityLabel("聊天訊息")
             if thread.loading && thread.messages.isEmpty {
                 ProgressView("載入訊息中")
                     .accessibilityLabel("正在載入訊息")
