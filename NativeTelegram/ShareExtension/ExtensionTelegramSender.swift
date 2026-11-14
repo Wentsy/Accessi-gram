@@ -200,11 +200,15 @@ final class ExtensionTelegramSender {
     func recentRecipients() async throws -> [ShareRecipient] {
         try await connect()
         let list: TDJSON = ["@type": "chatListMain"]
-        // loadChats populates the disk cache from the server; returning 404 is
-        // normal once there are no more chats to load.
-        _ = try? await query("loadChats", ["chat_list": list, "limit": 100])
-        let response = try await query("getChats", ["chat_list": list, "limit": 100])
-        let ids = response.intIDs("chat_ids")
+        // Read already synced recent chats immediately. Waiting for a fresh
+        // 100-chat network load can exceed the iOS Share Extension lifetime.
+        let cached = try? await query("getChats", ["chat_list": list, "limit": 100])
+        var ids = cached?.intIDs("chat_ids") ?? []
+        if ids.isEmpty {
+            _ = try? await query("loadChats", ["chat_list": list, "limit": 100])
+            let fetched = try await query("getChats", ["chat_list": list, "limit": 100])
+            ids = fetched.intIDs("chat_ids")
+        }
         var result: [ShareRecipient] = []
         for id in ids {
             let raw = try await query("getChat", ["chat_id": id])
