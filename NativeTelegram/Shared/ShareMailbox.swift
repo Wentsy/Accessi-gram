@@ -41,7 +41,23 @@ enum ShareMailbox {
             .appendingPathComponent(id, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let safeName = name.replacingOccurrences(of: "/", with: "_")
-        let destination = folder.appendingPathComponent(UUID().uuidString + "-" + safeName)
+        // Keep the user's original filename. Telegram uses the staged file's
+        // basename as the displayed document name; a UUID prefix would leak
+        // the extension's temporary implementation detail into every upload.
+        let original = folder.appendingPathComponent(safeName)
+        var destination = original
+        if FileManager.default.fileExists(atPath: destination.path) {
+            let ext = original.pathExtension
+            let stem = original.deletingPathExtension().lastPathComponent
+            var index = 2
+            repeat {
+                let candidate = ext.isEmpty
+                    ? "\(stem) (\(index))"
+                    : "\(stem) (\(index)).\(ext)"
+                destination = folder.appendingPathComponent(candidate)
+                index += 1
+            } while FileManager.default.fileExists(atPath: destination.path)
+        }
         try FileManager.default.copyItem(at: source, to: destination)
         let ext = destination.pathExtension.lowercased()
         let kind = ["jpg", "jpeg", "png", "heic", "webp"].contains(ext)
