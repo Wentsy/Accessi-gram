@@ -58,12 +58,10 @@ final class ExtensionTelegramSender {
 
     func connect() async throws {
         if authReady { return }
-        let config: ShareSessionConfiguration
-        do {
-            config = try ShareSessionBootstrap.configuration()
-        } catch {
-            throw ShareSendError.notInitialized
-        }
+        // Preserve the real cause (missing App Group entitlement, missing
+        // TDLib snapshot, corrupt configuration). Old code flattened all of
+        // these into the same misleading "open the app once" message.
+        let config = try ShareSessionBootstrap.configuration()
         configuration = config
 
         if clientID == 0 {
