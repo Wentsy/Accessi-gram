@@ -1,9 +1,17 @@
 # Accessi gram
 
 以使用者提供的 Turrit 1.5.5（10387）IPA 為基礎的 VoiceOver 補丁。
-目前為 **0.2.6**。
+目前為 **0.2.7**。
 
-## 0.2.6 本次調整
+## 0.2.7 全域無障礙續讀
+
+- 訊息、群組、頻道、聊天列表、一般 Telegram ListView，以及常見直向 UIScrollView／TableView／CollectionView，接近可視邊界時預先捲動。
+- 不等待三指翻頁才嘗試呈現下一批資料；採用目前 VoiceOver 焦點保留距離，降低焦點跳出清單的機率。
+- 避免不相關的輸入框、橫向內容捲動受影響，不覆寫 UIKit 的全域 accessibilityScroll。
+- 修正 Telegram 自訂確認刪除視窗的 action 呼叫方式，使用可用的 @objc pressed/buttonPressed；補上操作選單的切換、勾選狀態。
+- 保留確認視窗的文字輸入元件，以免修補動作按鈕時反而隱藏輸入框。
+
+## 0.2.7 本次調整
 
 - 對話列表不再提供虛擬「載入較早／較新的訊息」焦點，改為靠近頂／底部前預先呈現前後聊天訊息。
 - 不再把捲動容器的無障礙子樹整個隱藏，並排除無內容的訊息佔位焦點。
@@ -25,7 +33,7 @@ macOS + Xcode：
 
 ```sh
 bash scripts/build.sh
-python3 scripts/package.py Turrit_1.5.5_78c.ipa build/AccessiGram.dylib Accessi-gram-0.2.6-unsigned.ipa
+python3 scripts/package.py Turrit_1.5.5_78c.ipa build/AccessiGram.dylib Accessi-gram-0.2.7-unsigned.ipa
 ```
 
 也可至 Actions 的 **Build Accessi gram** 下載已編譯補丁。
@@ -36,4 +44,4 @@ python3 scripts/package.py Turrit_1.5.5_78c.ipa build/AccessiGram.dylib Accessi-
 
 ## 給接手的 Open Code
 
-先讀 `docs/BASELINE.md` 和 `docs/HANDOFF.md`。不要直接把 0.2.6 標成穩定版，也不要依 Swift 欄位的固定記憶體偏移修改資料。
+先讀 `docs/BASELINE.md` 和 `docs/HANDOFF.md`。不要直接把 0.2.7 標成穩定版，也不要依 Swift 欄位的固定記憶體偏移修改資料。
