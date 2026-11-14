@@ -40,7 +40,7 @@ bash scripts/build.sh
 - 語音：收到 Telegram OGG/Opus 語音後使用 opusfile 解碼，原生 UIKit 播放器可自動播放、暫停、調整進度與速度。一般檔案改用 Quick Look 預覽或 iOS 系統分享。
 - 互動選單：聊天訊息操作、機器人按鈕及表情回應全部改為可單項朗讀的 UIKit 清單。
 - App 關閉／背景通知：iOS 原生權限申請、APNs Token 及 Telegram TDLib registerDevice 已整合；**必須由 OC 簽署具有 Push Notifications 權限的 App ID，並替 Telegram API 應用配置 Apple APNs 服務端憑證，才能真正收到系統遠端通知**。未確認以上條件前不可宣稱背景推播可用。
-- 跨 App 分享：新增正式的 Share Extension。分享時可搜尋收件人、選擇私聊／群組、輸入說明文字及附加檔案；因 iOS 限制不能強制開啟主 App，改為安全佇列並在使用者再次開啟 Accessi Gram 時自動送出。分享視窗會明確提示尚未真正傳送。
+- 跨 App 分享：新增直接使用 Telegram TDLib 的 Share Extension。分享時選收件人、輸入說明文字，再由延伸功能直接上傳；只有收到 Telegram 真正的傳送成功通知才結束分享。不需再手動開啟主 App。首次更新後只要開啟新版 App 一次，便會建立獨立、受保護的分享登入副本。大型附件傳送仍受 iOS 分享程序執行時間限制。
 - 分享及通知所需能力：主 App、Share Extension 的 App Groups，以及主 App 的 aps-environment；**兩個套件需使用同一 Apple Team 簽名，並一起覆蓋安裝**。
 
 **給 OC 的細節與簽署流程：** [docs/OC_HANDOFF.md](docs/OC_HANDOFF.md)。本輪更動已提交，但未在本環境使用 Xcode／iPhone 編譯實測，請由 OC 以相同 Bundle ID、Keychain 與 TDLib 路徑接手打包。
