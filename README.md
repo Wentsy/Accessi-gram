@@ -1,7 +1,14 @@
 # Accessi gram
 
 以使用者提供的 Turrit 1.5.5（10387）IPA 為基礎的 VoiceOver 補丁。
-目前為 **0.2.5**。
+目前為 **0.2.6**。
+
+## 0.2.6 本次調整
+
+- 對話列表不再提供虛擬「載入較早／較新的訊息」焦點，改為靠近頂／底部前預先呈現前後聊天訊息。
+- 不再把捲動容器的無障礙子樹整個隱藏，並排除無內容的訊息佔位焦點。
+- 為 Telegram 自訂確認視窗和動作選單提供標籤、按鈕語意、點擊功能，讓刪除確認／取消不依賴螢幕識別。
+- 保留原生聊天分頁載入，VoiceOver 捲動通知只在實際完成後發送。
 
 ## 這版實作
 
@@ -18,7 +25,7 @@ macOS + Xcode：
 
 ```sh
 bash scripts/build.sh
-python3 scripts/package.py Turrit_1.5.5_78c.ipa build/AccessiGram.dylib Accessi-gram-0.2.5-unsigned.ipa
+python3 scripts/package.py Turrit_1.5.5_78c.ipa build/AccessiGram.dylib Accessi-gram-0.2.6-unsigned.ipa
 ```
 
 也可至 Actions 的 **Build Accessi gram** 下載已編譯補丁。
@@ -29,4 +36,4 @@ python3 scripts/package.py Turrit_1.5.5_78c.ipa build/AccessiGram.dylib Accessi-
 
 ## 給接手的 Open Code
 
-先讀 `docs/BASELINE.md` 和 `docs/HANDOFF.md`。不要直接把 0.2.5 標成穩定版，也不要依 Swift 欄位的固定記憶體偏移修改資料。
+先讀 `docs/BASELINE.md` 和 `docs/HANDOFF.md`。不要直接把 0.2.6 標成穩定版，也不要依 Swift 欄位的固定記憶體偏移修改資料。
