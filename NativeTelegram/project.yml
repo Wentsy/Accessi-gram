@@ -14,6 +14,7 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - Sources
+      - Resources/LaunchScreen.storyboard
     dependencies:
       - package: TDLibFramework
         product: TDLibFramework
@@ -25,6 +26,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: "Accessi Gram"
+        INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "錄製語音訊息"
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "選擇照片及影片傳送到 Telegram"
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
