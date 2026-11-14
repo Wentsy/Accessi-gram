@@ -42,7 +42,7 @@ final class TelegramService: ObservableObject {
     @Published var archived = false
     @Published var loadingChats = false
     @Published var passwordHint = ""
-    @Published var contacts: [(id: Int64, name: String)] = []
+    @Published var contacts: [TelegramContact] = []
 
     private var clientID: Int32 = 0
     private var apiID = 0
@@ -276,7 +276,7 @@ final class TelegramService: ObservableObject {
                     self.storeUser(user)
                     let name = self.users[userID] ?? "使用者 \(userID)"
                     if !self.contacts.contains(where: { $0.id == userID }) {
-                        self.contacts.append((id: userID, name: name))
+                        self.contacts.append(TelegramContact(id: userID, name: name))
                         self.contacts.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                     }
                 }
