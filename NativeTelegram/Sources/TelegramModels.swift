@@ -1,4 +1,10 @@
 import Foundation
+import Combine
+
+struct TelegramContact: Identifiable {
+    let id: Int64
+    let name: String
+}
 
 typealias JSONObject = [String: Any]
 
