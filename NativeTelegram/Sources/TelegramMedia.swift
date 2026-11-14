@@ -8,6 +8,7 @@ import CoreImage.CIFilterBuiltins
 @MainActor
 final class VoiceRecorder: ObservableObject {
     @Published var isRecording = false
+    private(set) var lastDuration = 0
     @Published var isPlaying = false
     private var recorder: AVAudioRecorder?
     private var player: AVAudioPlayer?
@@ -44,6 +45,7 @@ final class VoiceRecorder: ObservableObject {
     }
 
     func stop() -> URL? {
+        lastDuration = max(1, Int(ceil(recorder?.currentTime ?? 0)))
         recorder?.stop()
         recorder = nil
         isRecording = false
