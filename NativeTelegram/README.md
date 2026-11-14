@@ -40,23 +40,30 @@ bash scripts/build.sh
 - 語音：收到 Telegram OGG/Opus 語音後使用 opusfile 解碼，原生 UIKit 播放器可自動播放、暫停、調整進度與速度。一般檔案改用 Quick Look 預覽或 iOS 系統分享。
 - 互動選單：聊天訊息操作、機器人按鈕、表情回應及編輯改成 iOS 原生 UIKit 系統動作選單，避免 VoiceOver 打開後整頁空白。
 - 背景推播：已依使用者指示整組取消，無需伺服器、APNs、額外推播簽署。**保留 App 開啟期間新訊息震動提醒**。
-- 跨 App 分享：新增直接使用 Telegram TDLib 的 Share Extension。分享時選收件人、輸入說明文字，再由延伸功能直接上傳；只有收到 Telegram 真正的傳送成功通知才結束分享。不需再手動開啟主 App。首次更新後只要開啟新版 App 一次，便會建立獨立、受保護的分享登入副本。大型附件傳送仍受 iOS 分享程序執行時間限制。
-- 分享所需能力：主 App 與 Share Extension 皆要開啟相同的 App Groups；**兩個套件需使用同一 Apple Team 簽名，並一起覆蓋安裝**。不需要 Push Notifications 權限。
+- 跨 App 分享：使用獨立 TDLib Share Extension，不需要 App Groups。首次在分享視窗另外登入 Telegram 一次，之後沿用分享端登入；直接選最近聊天、輸入說明、上傳媒體，收到 Telegram 成功回報才結束。大型附件仍受 iOS 分享程序執行時間限制。
+- 小白簽：主 App 不需 App Groups 或 Push Notifications 權限，但 IPA 必須內含並正確簽署 Share Extension 的 .appex。主 App 原 Bundle ID、Keychain、TDLib 資料庫不變，直接覆蓋安裝。
 
 **給 OC 的細節與簽署流程：** [docs/OC_HANDOFF.md](docs/OC_HANDOFF.md)。本輪更動已提交，但未在本環境使用 Xcode／iPhone 編譯實測，請由 OC 以相同 Bundle ID、Keychain 與 TDLib 路徑接手打包。
 
 ## 2026-11-15：iOS 18.7.8 的修正
 
-- 分享收件人直接向 Telegram TDLib 讀取最近 100 個聊天，不再等待手機聯絡人匯出，也能立即搜尋最近的私聊、群組和頻道。需要分享功能的 App Group 和分享端登入副本仍須正常配置。
+- 分享收件人直接從分享端自身的 Telegram TDLib 讀取最近 100 個聊天，不再等待手機聯絡人匯出。分享端首次需要獨立登入，此後會保存授權；不使用 App Groups。
 - 檔案傳送從 SwiftUI `fileImporter` 改為原生 `UIDocumentPickerViewController`，確保在「檔案」選擇完按「打開」會實際觸發傳送回呼；支援多選、iCloud 和文件提供者。
 - 所有訊息操作、機器人按鈕、表情回應採 UIKit 原生系統動作選單；語音、圖片、影片、文件統一改用 UIKit 附件檢視畫面。
-- 聊天訊息列表底部新增 VoiceOver 焦點轉接，閱讀完最新訊息可以直接滑到「傳送照片或影片」、附件、編輯框，不再停在「垂直捲軸，100%」。
+- 聊天訊息列表底部人工「聊天輸入列」焦點轉接已移除，讓最後一則訊息與真實輸入按鈕之間以自然 VoiceOver 閱讀順序銜接，不再停留在假的轉接項目。
 - 不改已經能正常登入的 TDLib 帳號資料，也不要求重登；本輪尚未在 Xcode 與 iOS 18.7.8 真機驗證，直接提交給 OC 編譯。
 
 ## 2026-11-15：分享登入與快捷命令修正
 
-- 分享端登入：修正第一次授權前資料庫尚不存在、只在啟動前複製一次導致分享失敗的問題；登入 ready 後自動重試準備獨立 TDLib 分享副本。設定 → 聊天資料新增可操作的「重新建立分享登入」和具體錯誤狀態。分享延伸功能不再把 App Group 權限缺失等錯誤一律顯示成「先開啟 App 一次」。兩個簽署目標仍必須具有相同 App Groups entitlement。
+- 分享登入：不再複製主 App 的授權或依賴 App Groups。分享視窗首次顯示獨立 Telegram 登入（手機驗證碼／兩步驟密碼／QR），分享端自己的 TDLib 資料庫保存登入狀態。主 App 設定不再有無效的「重新建立分享登入」功能。
 - 訊息切換：移除聊天最尾端自動強制將旁白焦點送回照片按鈕的通知、移除每次聚焦訊息觸發的歷史分頁載入，減少左右滑動時焦點被拉回選單或編輯框。
 - BotFather 快捷命令：在照片與檔案按鈕旁新增「機器人斜線命令」。選擇 BotFather 設定的 /指令後直接送出，不進編輯框、不用再按傳送；原有訊息內的 inline/reply keyboard 互動按鈕保留。
 - MP3 等一般文件類型的音訊附件：點兩下直接打開原生音訊播放器，自動播放，支援常見 MP3、M4A、AAC、WAV、OGG/Opus 等格式，解碼能力依 iOS 和音訊套件而定。
 - 本輪原始碼已提交給 OC，但尚未 Xcode 編譯或實機驗證；背景 APNs 維持取消，只保留 App 開啟時的新訊息震動。
+
+## 最新：小白簽無 App Groups 版
+
+- `project.yml` 已移除 App Groups entitlements，主 App 與分享端各用自己的沙盒，主 App 登入不受影響。
+- `ShareExtension/ShareLoginController.swift` 讓首次使用者在分享介面完成 Telegram 登入。`scripts/build.sh` 會將 OC 提供的 Telegram API ID/Hash 同時加入主 App 和延伸功能 Info.plist；請勿把真實金鑰提交到公開 GitHub。
+- `AccessibleMessageTimeline.swift` 刪除了人工 `MessageTailRedirect` 和「聊天輸入列」停靠點，讓 VoiceOver 由最後一則訊息自然滑到照片、檔案、機器人斜線命令及文字編輯框。快捷命令點選後直接傳送，不必經過編輯框。
+- 這輪原始碼已提交，但尚未經 Xcode 編譯或 iOS 18.7.8 真機驗證。OC 以 `docs/OC_HANDOFF.md` 最新交接為準。
