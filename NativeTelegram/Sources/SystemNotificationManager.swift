@@ -88,8 +88,8 @@ final class SystemNotificationManager: NSObject, UIApplicationDelegate, UNUserNo
             if let key = entry.key as? String { result[key] = entry.value }
         }
         Task { @MainActor in
-            TelegramService.shared.processPush(payload) {
-                completionHandler(.newData)
+            TelegramService.shared.processPush(payload) { handled in
+                completionHandler(handled ? .newData : .noData)
             }
         }
     }
