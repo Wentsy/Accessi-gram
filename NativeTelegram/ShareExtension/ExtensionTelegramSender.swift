@@ -30,12 +30,15 @@ enum ShareSignInStage: Equatable {
 }
 
 enum ShareSendError: LocalizedError {
+    case invalidAPICredentials
     case authorizationRequired
     case noRecipient
     case failed(String)
 
     var errorDescription: String? {
         switch self {
+        case .invalidAPICredentials:
+            return "分享功能的 Telegram API ID 或 API Hash 無效。請重新輸入 my.telegram.org 取得的正確資料，或請 OC 在分享延伸功能中預置主 App 使用的同一組憑證。"
         case .authorizationRequired:
             return "請先在 Accessi Gram 分享視窗登入 Telegram；分享登入與聊天 App 的登入相互獨立。"
         case .noRecipient:
@@ -49,6 +52,8 @@ enum ShareSendError: LocalizedError {
 @MainActor
 final class ExtensionTelegramSender {
     private var clientID: Int32 = 0
+    private var receiverStarted = false
+    private var closeWaiter: CheckedContinuation<Void, Never>?
     private var callbacks: [String: (TDJSON) -> Void] = [:]
     private(set) var stage: ShareSignInStage = .connecting
     var onStageChanged: ((ShareSignInStage) -> Void)?
@@ -78,7 +83,9 @@ final class ExtensionTelegramSender {
         configuration = config
         updateStage(.connecting)
         clientID = td_create_client_id()
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        if !receiverStarted {
+            receiverStarted = true
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             while true {
                 if let response = td_receive(0.25) {
                     let bytes = Data(String(cString: response).utf8)
@@ -88,14 +95,43 @@ final class ExtensionTelegramSender {
                 }
                 guard self != nil else { return }
             }
+            }
         }
         let response = try await query("getAuthorizationState")
         handleAuthorization(response)
     }
 
+    /// A wrong API pair was already applied to setTdlibParameters, so it
+    /// cannot be changed in-place. Close that TDLib client, discard ONLY
+    /// the extension's local session and start with the replacement pair.
     func saveAPI(id: Int, hash: String) async throws {
-        _ = try ShareSessionBootstrap.saveCredentials(apiID: id, apiHash: hash)
+        let validHash = hash.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard id > 0, validHash.count == 32,
+              validHash.unicodeScalars.allSatisfy({
+                  CharacterSet(charactersIn: "0123456789abcdefABCDEF").contains($0)
+              })
+        else {
+            throw ShareSendError.invalidAPICredentials
+        }
+
+        if clientID != 0 {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                closeWaiter = continuation
+                call("close")
+            }
+        }
+
+        try? ShareSessionBootstrap.reset()
+        _ = try ShareSessionBootstrap.saveCredentials(apiID: id, apiHash: validHash)
+        parametersSent = false
+        authReady = false
+        configuration = nil
+        updateStage(.connecting)
         try await start()
+    }
+
+    func editAPI() {
+        updateStage(.apiCredentials)
     }
 
     private func authorize(_ method: String, _ arguments: TDJSON = [:]) async throws {
@@ -162,12 +198,19 @@ final class ExtensionTelegramSender {
             call(name, parameters) { continuation.resume(returning: $0) }
         }
         if response.text("@type") == "error" {
-            throw ShareSendError.failed(response.text("message"))
+            let reason = response.text("message")
+            if reason == "API_ID_INVALID" || reason == "CONNECTION_API_ID_INVALID" {
+                updateStage(.apiCredentials)
+                throw ShareSendError.invalidAPICredentials
+            }
+            throw ShareSendError.failed(reason)
         }
         return response
     }
 
     private func receive(_ json: TDJSON) {
+        if json["@client_id"] != nil,
+           json.number("@client_id") != Int64(clientID) { return }
         if let token = json["@extra"] as? String, let callback = callbacks.removeValue(forKey: token) {
             callback(json)
             return
@@ -246,7 +289,16 @@ final class ExtensionTelegramSender {
         case "authorizationStateWaitOtherDeviceConfirmation":
             updateStage(.qr(state.text("link")))
         case "authorizationStateClosed":
-            onAuthorizationError?("分享登入工作階段已關閉，請重新開啟分享視窗")
+            let waiter = closeWaiter
+            closeWaiter = nil
+            clientID = 0
+            authReady = false
+            parametersSent = false
+            if let waiter {
+                waiter.resume()
+            } else {
+                onAuthorizationError?("分享登入工作階段已關閉，請重新開啟分享視窗")
+            }
         default:
             break
         }
