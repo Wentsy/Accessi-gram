@@ -15,3 +15,11 @@
 7. 無內容的圖示按鈕、送出按鈕、附件各種彈窗尚需實機結果定位；不要對所有 UIView 全域開啟 isAccessibilityElement。
 
 只在使用者回報可用後更新穩定基準。不要將未驗證的完整支援寫入版本說明。
+
+## 0.2.6 聊天閱讀及彈窗（2026-11-14）
+
+- 取消虛擬 HistoryBoundary，避免從訊息末端滑到虛構的按鈕。
+- 接近可視訊息區的前後兩項時，提前透過 ListView 原生 scroller 露出鄰近訊息，不重設目前單指閱讀焦點。
+- 保留 iOS 18 的相鄰文字導覽與 Read All 列表翻頁處理，但不保證網路未載入歷史時能無限連讀。
+- TextAlertContentNode 的 actionNodes、ActionSheetButtonNode 等採用固定 AX 元素，直接執行原生 performAction。
+- 沒有 iPhone 實機，不能聲稱 VoiceOver 行為已實測；需由 OC 編譯與使用者檢查。
