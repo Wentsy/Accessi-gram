@@ -275,7 +275,7 @@ final class AccessibleSettingsController: UITableViewController {
         service.$chatSyncStatus.receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                let path = IndexPath(row: 0, section: 1)
+                let path = IndexPath(row: 0, section: 2)
                 if let cell = self.tableView.cellForRow(at: path) as? AccessibleSettingCell {
                     cell.display(title: "重新同步對話",
                                  detail: self.service.chatSyncStatus, button: true)
@@ -284,21 +284,27 @@ final class AccessibleSettingsController: UITableViewController {
             .store(in: &subscriptions)
     }
 
-    override func numberOfSections(in tableView: UITableView) -> Int { 3 }
+    override func numberOfSections(in tableView: UITableView) -> Int { 4 }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { 1 }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        ["說明與協助", "聊天資料", "帳號"][section]
+        ["通知與震動", "說明與協助", "聊天資料", "帳號"][section]
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt path: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "setting", for: path) as! AccessibleSettingCell
         switch path.section {
         case 0:
+            cell.display(
+                title: "App 開啟時新訊息震動",
+                detail: service.foregroundVibrationEnabled ? "已開啟，點兩下關閉" : "已關閉，點兩下開啟",
+                button: true
+            )
+        case 1:
             cell.display(title: "使用指南", detail: "閱讀旁白翻頁、訊息操作、語音和翻譯說明",
                          button: true)
-        case 1:
+        case 2:
             cell.display(title: "重新同步對話", detail: service.chatSyncStatus, button: true)
         default:
             cell.display(title: "登出 Telegram", detail: "須再次確認才會登出", button: true)
@@ -310,8 +316,21 @@ final class AccessibleSettingsController: UITableViewController {
         tableView.deselectRow(at: path, animated: true)
         switch path.section {
         case 0:
-            navigationController?.pushViewController(AccessibleHelpController(style: .insetGrouped), animated: true)
+            service.toggleForegroundVibration()
+            if let cell = tableView.cellForRow(at: path) as? AccessibleSettingCell {
+                cell.display(
+                    title: "App 開啟時新訊息震動",
+                    detail: service.foregroundVibrationEnabled ? "已開啟，點兩下關閉" : "已關閉，點兩下開啟",
+                    button: true
+                )
+            }
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: service.foregroundVibrationEnabled ? "新訊息震動已開啟" : "新訊息震動已關閉"
+            )
         case 1:
+            navigationController?.pushViewController(AccessibleHelpController(style: .insetGrouped), animated: true)
+        case 2:
             service.loadChats()
             UIAccessibility.post(notification: .announcement,
                                  argument: "已要求重新同步 Telegram 對話")
