@@ -16,7 +16,9 @@ enum ShareSessionBootstrap {
     static var groupRoot: URL {
         FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: ShareMailbox.appGroup
-        )!
+        ) ?? FileManager.default.temporaryDirectory.appendingPathComponent(
+            "share-extension-unavailable", isDirectory: true
+        )
     }
 
     static var databaseDirectory: URL {
@@ -50,7 +52,9 @@ enum ShareSessionBootstrap {
         mainDatabaseDirectory: URL
     ) throws {
         let manager = FileManager.default
-        let root = groupRoot
+        guard let root = manager.containerURL(
+            forSecurityApplicationGroupIdentifier: ShareMailbox.appGroup
+        ) else { throw CocoaError(.fileNoSuchFile) }
         try manager.createDirectory(at: root, withIntermediateDirectories: true)
 
         // Never overwrite a database already used by Share Extension.
