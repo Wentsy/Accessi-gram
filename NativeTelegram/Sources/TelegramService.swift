@@ -220,6 +220,10 @@ final class TelegramService: ObservableObject {
             let message = json.object("message")
             threads[message.number("chat_id")]?.remove([json.number("old_message_id")])
             receive(message)
+        case "updateMessageSendFailed":
+            let failure = json.object("error")
+            let reason = failure.text("message")
+            errorMessage = "Telegram 傳送訊息失敗：\(reason.isEmpty ? "未知原因" : reason)"
         case "updateMessageContent", "updateMessageEdited":
             let chatID = json.number("chat_id")
             let id = json.number("message_id")
