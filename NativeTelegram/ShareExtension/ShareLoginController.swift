@@ -18,6 +18,7 @@ final class ShareLoginController: UIViewController {
     private let password = UITextField()
     private let email = UITextField()
     private let primary = UIButton(type: .system)
+    private let editAPIButton = UIButton(type: .system)
     private let qrButton = UIButton(type: .system)
     private let copyButton = UIButton(type: .system)
     private let qrImage = UIImageView()
@@ -45,6 +46,7 @@ final class ShareLoginController: UIViewController {
         identifier.keyboardType = .numberPad
         configure(apiHash, label: "Telegram API Hash", placeholder: "輸入 API Hash")
         apiHash.textContentType = .password
+        apiHash.isSecureTextEntry = true
         apiHash.autocorrectionType = .no
         apiHash.autocapitalizationType = .none
         configure(phone, label: "Telegram 手機號碼", placeholder: "+886...")
@@ -62,6 +64,13 @@ final class ShareLoginController: UIViewController {
         primary.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         primary.addTarget(self, action: #selector(submit), for: .touchUpInside)
         primary.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
+
+        editAPIButton.setTitle("修改分享功能的 API ID／Hash", for: .normal)
+        editAPIButton.accessibilityLabel = "修改 Telegram API ID 和 API Hash"
+        editAPIButton.accessibilityHint = "只修改分享功能使用的 API，不影響 Accessi Gram 主程式登入"
+        editAPIButton.accessibilityLanguage = "zh-TW"
+        editAPIButton.addTarget(self, action: #selector(editAPI), for: .touchUpInside)
+        editAPIButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
 
         qrButton.setTitle("改用其他裝置掃描 QR Code", for: .normal)
         qrButton.accessibilityLabel = "改用 QR Code 登入分享功能"
@@ -82,7 +91,7 @@ final class ShareLoginController: UIViewController {
 
         let stack = UIStackView(arrangedSubviews: [
             statusLabel, identifier, apiHash, phone, code, password,
-            email, primary, qrButton, qrImage, copyButton
+            email, primary, editAPIButton, qrButton, qrImage, copyButton
         ])
         stack.axis = .vertical
         stack.spacing = 16
@@ -130,6 +139,7 @@ final class ShareLoginController: UIViewController {
             field.isHidden = true
         }
         qrButton.isHidden = true
+        editAPIButton.isHidden = true
         qrImage.isHidden = true
         copyButton.isHidden = true
         primary.isHidden = false
@@ -144,27 +154,33 @@ final class ShareLoginController: UIViewController {
             statusLabel.text = "正在連接 Telegram，讀取分享專用登入狀態"
             primary.isHidden = true
         case .phone:
-            statusLabel.text = "第一次從其他 App 分享時，需要在分享視窗登入一次 Telegram；日後不必重新登入。"
+            statusLabel.text = "第一次分享需要單獨登入 Telegram。若輸入手機後出現 API_ID_INVALID，請點「修改分享功能的 API ID／Hash」。"
             phone.isHidden = false
+            editAPIButton.isHidden = false
             qrButton.isHidden = false
             primary.setTitle("取得 Telegram 驗證碼", for: .normal)
         case .code:
+            editAPIButton.isHidden = false
             statusLabel.text = "請輸入 Telegram 傳送給你的登入驗證碼"
             code.isHidden = false
             primary.setTitle("驗證並登入", for: .normal)
         case .password:
+            editAPIButton.isHidden = false
             statusLabel.text = "請輸入 Telegram 的兩步驟驗證密碼"
             password.isHidden = false
             primary.setTitle("確認密碼", for: .normal)
         case .email:
+            editAPIButton.isHidden = false
             statusLabel.text = "Telegram 要求先驗證電子郵件地址"
             email.isHidden = false
             primary.setTitle("繼續", for: .normal)
         case .emailCode:
+            editAPIButton.isHidden = false
             statusLabel.text = "請輸入電子郵件收到的 Telegram 驗證碼"
             email.isHidden = false
             primary.setTitle("驗證電子郵件", for: .normal)
         case .qr(let link):
+            editAPIButton.isHidden = false
             statusLabel.text = "使用另一台已登入 Telegram 的裝置掃描 QR Code 完成分享登入"
             qrImage.isHidden = false
             copyButton.isHidden = false
@@ -182,6 +198,11 @@ final class ShareLoginController: UIViewController {
             }
         }
         statusLabel.accessibilityLabel = statusLabel.text
+    }
+
+    @objc private func editAPI() {
+        sender.editAPI()
+        UIAccessibility.post(notification: .layoutChanged, argument: identifier)
     }
 
     @objc private func submit() {
