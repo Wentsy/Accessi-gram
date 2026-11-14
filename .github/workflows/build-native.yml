@@ -1,0 +1,21 @@
+name: Build Accessi Gram Native
+on:
+  push:
+    branches: [rewrite/native-tdlib-voiceover]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Build Native App
+        run: bash NativeTelegram/scripts/build.sh
+      - name: Upload Unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: AccessiGramNative-unsigned
+          path: NativeTelegram/dist/AccessiGramNative-unsigned.ipa

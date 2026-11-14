@@ -35,8 +35,8 @@ struct RootScreen: View {
 
 struct AuthorizationScreen: View {
     @EnvironmentObject private var service: TelegramService
-    @State private var apiID = ""
-    @State private var apiHash = ""
+    @State private var apiID = "37253223"
+    @State private var apiHash = "aca2ec3d1e441897a84b1de89c4cb739"
     @State private var phone = ""
     @State private var code = ""
     @State private var password = ""
