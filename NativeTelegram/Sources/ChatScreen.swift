@@ -53,16 +53,9 @@ struct ChatScreen: View {
             }
             Divider()
             if let reply = thread.replyTo {
-                HStack {
-                    Text("回覆 \(reply.sender)：\(reply.body)")
-                        .lineLimit(1)
-                        .accessibilityLabel("目前回覆 \(reply.sender)，\(reply.body)")
-                    Spacer()
-                    Button { thread.replyTo = nil } label: { Label("取消回覆", systemImage: "xmark") }
-                        .labelStyle(.iconOnly)
+                AccessibleReplyBanner(sender: reply.sender, content: reply.body) {
+                    thread.replyTo = nil
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
             }
             composer
         }
