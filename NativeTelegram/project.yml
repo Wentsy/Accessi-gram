@@ -7,6 +7,12 @@ packages:
   TDLibFramework:
     url: https://github.com/Swiftgram/TDLibFramework
     branch: main
+  OpusCodec:
+    url: https://github.com/sbooth/opus-binary-xcframework
+    from: 0.3.0
+  OggCodec:
+    url: https://github.com/sbooth/ogg-binary-xcframework
+    from: 0.1.3
 targets:
   AccessiGramNative:
     type: application
@@ -18,6 +24,10 @@ targets:
     dependencies:
       - package: TDLibFramework
         product: TDLibFramework
+      - package: OpusCodec
+        product: opus
+      - package: OggCodec
+        product: ogg
     settings:
       base:
         SWIFT_VERSION: "5.0"
