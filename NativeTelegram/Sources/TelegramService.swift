@@ -117,6 +117,7 @@ final class TelegramService: ObservableObject {
     private var lastVibration = Date.distantPast
     private var currentPushToken = ""
     private var registeredPushToken = ""
+    private var shareUploadInProgress = false
 
     private init() {}
 
@@ -291,6 +292,8 @@ final class TelegramService: ObservableObject {
                 chatSyncStatus = "正在同步 Telegram 對話與群組"
                 SystemNotificationManager.shared.refreshAuthorizationStatus()
                 registerPendingPushToken()
+                loadContacts()
+                processSharedUploads()
                 loadChats()
             }
         case "authorizationStateLoggingOut", "authorizationStateClosed": authStage = .phone
@@ -427,12 +430,13 @@ final class TelegramService: ObservableObject {
         if !chats.isEmpty {
             chatSyncStatus = "已同步 \(chats.count) 個對話"
         }
+        publishShareRecipients()
     }
 
 
     func loadContacts() {
         request("getContacts") { [weak self] response in
-            let ids = (response["user_ids"] as? [NSNumber] ?? []).map(\.int64Value)
+            let ids = response.intIDs("user_ids")
             for userID in ids {
                 self?.request("getUser", ["user_id": userID]) { [weak self] user in
                     guard let self, user.text("@type") == "user" else { return }
@@ -441,10 +445,72 @@ final class TelegramService: ObservableObject {
                     if !self.contacts.contains(where: { $0.id == userID }) {
                         self.contacts.append(TelegramContact(id: userID, name: name))
                         self.contacts.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                        self.publishShareRecipients()
                     }
                 }
             }
         }
+    }
+
+    private func publishShareRecipients() {
+        var entries = chatsByID.values
+            .filter { $0.order > 0 && !$0.isArchived }
+            .sorted { $0.order > $1.order }
+            .map {
+                ShareRecipient(id: "chat:\($0.id)", title: $0.title,
+                               chatID: "\($0.id)", userID: nil)
+            }
+
+        // Contacts without an existing conversation can also be selected.
+        for contact in contacts where !entries.contains(where: {
+            $0.title == contact.name
+        }) {
+            entries.append(ShareRecipient(
+                id: "contact:\(contact.id)", title: contact.name,
+                chatID: nil, userID: "\(contact.id)"
+            ))
+        }
+        ShareMailbox.saveRecipients(entries)
+    }
+
+    func processSharedUploads() {
+        guard authStage == .ready, !shareUploadInProgress else { return }
+        guard let first = ShareMailbox.pending().first else { return }
+        shareUploadInProgress = true
+
+        if let chat = first.target.chatID.flatMap(Int64.init) {
+            sendSharedDraft(first, to: chat)
+        } else if let user = first.target.userID.flatMap(Int64.init) {
+            createPrivateChat(userID: user) { [weak self] id in
+                guard let self else { return }
+                if let id {
+                    self.sendSharedDraft(first, to: id)
+                } else {
+                    self.shareUploadInProgress = false
+                }
+            }
+        } else {
+            errorMessage = "分享找不到收件人，請重新選擇"
+            shareUploadInProgress = false
+        }
+    }
+
+    private func sendSharedDraft(_ draft: PendingShare, to chatID: Int64) {
+        if draft.attachments.isEmpty {
+            sendText(chatID: chatID, text: draft.caption)
+        } else {
+            for (index, attachment) in draft.attachments.enumerated() {
+                guard let url = ShareMailbox.url(for: attachment) else { continue }
+                sendMedia(chatID: chatID, fileURL: url,
+                          kind: attachment.kind,
+                          caption: index == 0 ? draft.caption : "")
+            }
+        }
+        ShareMailbox.complete(draft)
+        shareUploadInProgress = false
+        UIAccessibility.post(notification: .announcement,
+                             argument: "已提交分享給 \(draft.target.title)，正在傳送")
+        processSharedUploads()
     }
 
     func createPrivateChat(userID: Int64, completion: @escaping (Int64?) -> Void) {
