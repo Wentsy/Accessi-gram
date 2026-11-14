@@ -270,7 +270,13 @@ final class ExtensionTelegramSender {
                 "use_test_dc": false
             ]) { [weak self] response in
                 if response.text("@type") == "error" {
-                    self?.onAuthorizationError?(response.text("message"))
+                    let reason = response.text("message")
+                    if reason == "API_ID_INVALID" || reason == "CONNECTION_API_ID_INVALID" {
+                        self?.updateStage(.apiCredentials)
+                        self?.onAuthorizationError?(ShareSendError.invalidAPICredentials.localizedDescription)
+                    } else {
+                        self?.onAuthorizationError?(reason)
+                    }
                 }
             }
         case "authorizationStateReady":
