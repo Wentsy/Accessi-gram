@@ -117,7 +117,6 @@ final class TelegramService: ObservableObject {
     private var lastVibration = Date.distantPast
     private var currentPushToken = ""
     private var registeredPushToken = ""
-    private var shareUploadInProgress = false
 
     private init() {}
 
@@ -312,7 +311,6 @@ final class TelegramService: ObservableObject {
                 SystemNotificationManager.shared.refreshAuthorizationStatus()
                 registerPendingPushToken()
                 loadContacts()
-                processSharedUploads()
                 loadChats()
             }
         case "authorizationStateLoggingOut", "authorizationStateClosed": authStage = .phone
@@ -493,46 +491,6 @@ final class TelegramService: ObservableObject {
             ))
         }
         ShareMailbox.saveRecipients(entries)
-    }
-
-    func processSharedUploads() {
-        guard authStage == .ready, !shareUploadInProgress else { return }
-        guard let first = ShareMailbox.pending().first else { return }
-        shareUploadInProgress = true
-
-        if let chat = first.target.chatID.flatMap(Int64.init) {
-            sendSharedDraft(first, to: chat)
-        } else if let user = first.target.userID.flatMap(Int64.init) {
-            createPrivateChat(userID: user) { [weak self] id in
-                guard let self else { return }
-                if let id {
-                    self.sendSharedDraft(first, to: id)
-                } else {
-                    self.shareUploadInProgress = false
-                }
-            }
-        } else {
-            errorMessage = "分享找不到收件人，請重新選擇"
-            shareUploadInProgress = false
-        }
-    }
-
-    private func sendSharedDraft(_ draft: PendingShare, to chatID: Int64) {
-        if draft.attachments.isEmpty {
-            sendText(chatID: chatID, text: draft.caption)
-        } else {
-            for (index, attachment) in draft.attachments.enumerated() {
-                guard let url = ShareMailbox.url(for: attachment) else { continue }
-                sendMedia(chatID: chatID, fileURL: url,
-                          kind: attachment.kind,
-                          caption: index == 0 ? draft.caption : "")
-            }
-        }
-        ShareMailbox.complete(draft)
-        shareUploadInProgress = false
-        UIAccessibility.post(notification: .announcement,
-                             argument: "已提交分享給 \(draft.target.title)，正在傳送")
-        processSharedUploads()
     }
 
     func createPrivateChat(userID: Int64, completion: @escaping (Int64?) -> Void) {
