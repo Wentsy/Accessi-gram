@@ -826,18 +826,21 @@ private struct HistoryViewport {
     }
 
     @discardableResult
-    func prepareAdjacent(to element: UIView, direction: HistoryDirection) -> Bool {
+    func prepareAdjacent(to element: UIView, direction: HistoryDirection, preserving focus: UIView? = nil) -> Bool {
         guard let window = view.window else { return false }
         let bounds = self.bounds
         let anchor = window.convert(element.bounds, from: element)
         guard anchor.intersects(bounds) else { return false }
         let neighbor = adjacent(to: element, direction: direction)?.frame
         if let neighbor, neighbor.intersection(bounds).height >= min(44, neighbor.height) { return false }
-        // Keep a slice of the current message visible, including a message taller than the screen.
-        let overlap = min(44, anchor.height / 2)
+        // A lookahead must never scroll the currently spoken message out of view.
+        let retained = focus ?? element
+        let focusedFrame = window.convert(retained.bounds, from: retained)
+        guard focusedFrame.intersects(bounds) else { return false }
+        let overlap = min(44, focusedFrame.height / 2)
         let retainedDistance = direction == .older
-            ? bounds.maxY - anchor.minY - overlap
-            : anchor.maxY - bounds.minY - overlap
+            ? bounds.maxY - focusedFrame.minY - overlap
+            : focusedFrame.maxY - bounds.minY - overlap
         let revealDistance = neighbor.map {
             direction == .older
                 ? bounds.minY - $0.maxY + min(64, $0.height)
@@ -869,7 +872,7 @@ private func prepareReadingEdge(_ element: UIView, history: HistoryViewport) {
     } else { return }
     if let next = history.adjacent(to: edge, direction: direction),
        next.frame.intersection(history.bounds).height >= min(64, next.frame.height) { return }
-    _ = history.prepareAdjacent(to: edge, direction: direction)
+    _ = history.prepareAdjacent(to: edge, direction: direction, preserving: element)
 }
 
 private func isMainHistory(_ listNode: NSObject, chat: UIViewController) -> Bool {
