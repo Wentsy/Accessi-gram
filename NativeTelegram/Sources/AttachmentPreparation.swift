@@ -29,19 +29,25 @@ enum AttachmentPreparation {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let target = directory.appendingPathComponent(source.lastPathComponent)
 
-            var coordinatorError: NSError?
-            var copyError: Error?
-            NSFileCoordinator(filePresenter: nil).coordinate(
-                readingItemAt: source, options: [], error: &coordinatorError
-            ) { readableURL in
-                do {
-                    try FileManager.default.copyItem(at: readableURL, to: target)
-                } catch {
-                    copyError = error
+            if source.path.hasPrefix(NSHomeDirectory()) {
+                // UIDocumentPicker(asCopy: true) has already supplied a
+                // readable local copy. NSFileCoordinator is unnecessary here.
+                try FileManager.default.copyItem(at: source, to: target)
+            } else {
+                var coordinatorError: NSError?
+                var copyError: Error?
+                NSFileCoordinator(filePresenter: nil).coordinate(
+                    readingItemAt: source, options: [], error: &coordinatorError
+                ) { readableURL in
+                    do {
+                        try FileManager.default.copyItem(at: readableURL, to: target)
+                    } catch {
+                        copyError = error
+                    }
                 }
+                if let error = coordinatorError { throw error }
+                if let error = copyError { throw error }
             }
-            if let error = coordinatorError { throw error }
-            if let error = copyError { throw error }
             guard FileManager.default.isReadableFile(atPath: target.path) else {
                 throw Failure.unreadableFile
             }
