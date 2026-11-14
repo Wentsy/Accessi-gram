@@ -18,6 +18,9 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
     func makeUIView(context: Context) -> PagingTableView {
         let table = PagingTableView(frame: .zero, style: .plain)
         table.backgroundColor = UIColor.systemBackground
+        table.showsVerticalScrollIndicator = false
+        table.showsHorizontalScrollIndicator = false
+        table.tableFooterView = MessageTailRedirect(frame: CGRect(x: 0, y: 0, width: 1, height: 22))
         table.separatorStyle = .none
         table.estimatedRowHeight = 72
         table.rowHeight = UITableView.automaticDimension
@@ -186,8 +189,35 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
 final class PagingTableView: UITableView {
     var olderAction: (() -> Void)?
     override func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
-        if direction == .down || direction == .up { olderAction?() }
+        if direction == .down && contentOffset.y < 750 { olderAction?() }
         return super.accessibilityScroll(direction)
+    }
+}
+
+/// The last accessibility stop in the table forwards focus into the real
+/// composer, instead of trapping it on UITableView's page/scrollbar element.
+final class MessageTailRedirect: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = true
+        accessibilityLabel = "傳送照片或影片"
+        accessibilityHint = "下一個操作是聊天輸入列"
+        accessibilityLanguage = "zh-TW"
+        accessibilityTraits = .button
+    }
+
+    required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
+
+    override func accessibilityElementDidBecomeFocused() {
+        super.accessibilityElementDidBecomeFocused()
+        DispatchQueue.main.async {
+            ComposerBarView.active?.focusFirstAttachment()
+        }
+    }
+
+    override func accessibilityActivate() -> Bool {
+        ComposerBarView.active?.focusFirstAttachment()
+        return true
     }
 }
 
