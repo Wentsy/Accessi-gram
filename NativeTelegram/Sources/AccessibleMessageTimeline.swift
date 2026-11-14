@@ -20,7 +20,6 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
         table.backgroundColor = UIColor.systemBackground
         table.showsVerticalScrollIndicator = false
         table.showsHorizontalScrollIndicator = false
-        table.tableFooterView = MessageTailRedirect(frame: CGRect(x: 0, y: 0, width: 1, height: 22))
         table.separatorStyle = .none
         table.estimatedRowHeight = 72
         table.rowHeight = UITableView.automaticDimension
@@ -188,26 +187,6 @@ final class PagingTableView: UITableView {
     override func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
         if direction == .down && contentOffset.y < 750 { olderAction?() }
         return super.accessibilityScroll(direction)
-    }
-}
-
-/// The last accessibility stop in the table forwards focus into the real
-/// composer, instead of trapping it on UITableView's page/scrollbar element.
-final class MessageTailRedirect: UIView {
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isAccessibilityElement = true
-        accessibilityLabel = "聊天輸入列"
-        accessibilityHint = "繼續右滑可前往傳送照片、傳送檔案與訊息編輯框；點兩下直接跳到輸入列"
-        accessibilityLanguage = "zh-TW"
-        accessibilityTraits = .button
-    }
-
-    required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
-
-    override func accessibilityActivate() -> Bool {
-        ComposerBarView.active?.focusFirstAttachment()
-        return true
     }
 }
 
