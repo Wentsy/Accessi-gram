@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import Security
 import UIKit
+import AudioToolbox
 import TDLibFramework
 
 typealias TDCallback = (JSONObject) -> Void
@@ -89,6 +90,13 @@ final class TelegramService: ObservableObject {
     @Published var moreChatsAvailable = true
     @Published var passwordHint = ""
     @Published var contacts: [TelegramContact] = []
+    @Published var foregroundVibrationEnabled =
+        UserDefaults.standard.object(forKey: "foregroundMessageVibration") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(foregroundVibrationEnabled,
+                                      forKey: "foregroundMessageVibration")
+        }
+    }
 
     private var clientID: Int32 = 0
     private var apiID = 0
@@ -101,6 +109,10 @@ final class TelegramService: ObservableObject {
     private var receiverStarted = false
     private var chatListLimit = 100
     private var parametersRequested = false
+    private var authorizedSince = Date.distantFuture
+    private var alreadyVibrated = Set<String>()
+    private var recentVibrationIDs: [String] = []
+    private var lastVibration = Date.distantPast
 
     private init() {}
 
@@ -201,7 +213,9 @@ final class TelegramService: ObservableObject {
         case "updateUser":
             storeUser(json.object("user"))
         case "updateNewMessage":
-            receive(json.object("message"))
+            let message = json.object("message")
+            receive(message)
+            vibrateIfIncoming(message)
         case "updateMessageSendSucceeded":
             let message = json.object("message")
             threads[message.number("chat_id")]?.remove([json.number("old_message_id")])
@@ -263,6 +277,9 @@ final class TelegramService: ObservableObject {
             let firstReady = authStage != .ready
             authStage = .ready
             if firstReady {
+                authorizedSince = Date()
+                alreadyVibrated.removeAll()
+                recentVibrationIDs.removeAll()
                 chatSyncStatus = "正在同步 Telegram 對話與群組"
                 loadChats()
             }
@@ -490,6 +507,34 @@ final class TelegramService: ObservableObject {
                                               "message_ids": [last.id], "force_read": true])
             }
         }
+    }
+
+    // Only real-time incoming updates can trigger this. getChatHistory / cached
+    // messages and outgoing sends intentionally never call this method.
+    private func vibrateIfIncoming(_ message: JSONObject) {
+        guard foregroundVibrationEnabled,
+              UIApplication.shared.applicationState == .active,
+              !message.flag("is_outgoing"),
+              message.number("date") >= Int64(authorizedSince.timeIntervalSince1970) - 2
+        else { return }
+
+        let key = "\(message.number("chat_id")):\(message.number("id"))"
+        guard !alreadyVibrated.contains(key) else { return }
+        alreadyVibrated.insert(key)
+        recentVibrationIDs.append(key)
+        if recentVibrationIDs.count > 240 {
+            alreadyVibrated.remove(recentVibrationIDs.removeFirst())
+        }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastVibration) >= 0.7 else { return }
+        lastVibration = now
+        // iPhone system vibration. Respect device/system haptic settings.
+        AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    }
+
+    func toggleForegroundVibration() {
+        foregroundVibrationEnabled.toggle()
     }
 
     private func receive(_ raw: JSONObject) {
