@@ -230,6 +230,8 @@ private final class ChatState: NSObject {
     var actionsInstalled = false
     weak var lastMessageFocus: UIView?
     var readingDirection: HistoryDirection?
+    weak var lastPrefetchAnchor: UIView?
+    var prefetchScheduled = false
 }
 private var chatStateKey: UInt8 = 0
 private func state(_ controller: UIViewController) -> ChatState {
@@ -947,7 +949,22 @@ private func prepareReadingEdge(_ element: UIView, history: HistoryViewport) {
     }
     if let next = history.adjacent(to: edge, direction: direction),
        next.frame.intersection(history.bounds).height >= min(64, next.frame.height) { return }
-    _ = history.prepareAdjacent(to: edge, direction: direction, preserving: element)
+    let moved = history.prepareAdjacent(to: edge, direction: direction, preserving: element)
+    if moved { return }
+    // At a native list boundary there may be no mounted adjacent message yet.
+    // Join the actual history load instead of requiring the user to three-finger-scroll.
+    guard history.adjacent(to: element, direction: direction) == nil,
+          history.hasHistory(direction),
+          !tracking.prefetchScheduled,
+          tracking.lastPrefetchAnchor !== element else { return }
+    tracking.lastPrefetchAnchor = element
+    tracking.prefetchScheduled = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak element] in
+        tracking.prefetchScheduled = false
+        guard let element, let current = HistoryViewport(containing: element),
+              UIAccessibility.focusedElement(using: .notificationVoiceOver) as? UIView === element else { return }
+        _ = pageHistory(current, direction: direction, anchor: element)
+    }
 }
 
 
@@ -1224,7 +1241,8 @@ private func pageHistory(_ history: HistoryViewport, direction: HistoryDirection
                 UIAccessibility.post(notification: .layoutChanged, argument: next.element)
                 return
             }
-            if changed, let next = (direction == .older ? rows.last : rows.first) {
+            let fresh = rows.filter { !request.startingRows.contains(ObjectIdentifier($0.element)) }
+            if changed, let next = (direction == .older ? fresh.last : fresh.first) {
                 objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
                 UIAccessibility.post(notification: .layoutChanged, argument: next.element)
                 return
