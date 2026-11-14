@@ -268,51 +268,57 @@ final class AccessibleSettingsController: UITableViewController {
         tableView.register(AccessibleSettingCell.self, forCellReuseIdentifier: "setting")
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 74
+        tableView.accessibilityLanguage = "zh-TW"
+
+        // Update visible status in place rather than reloading a whole section
+        // and displacing a VoiceOver cursor in the middle of the page.
         service.$chatSyncStatus.receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.tableView.reloadSections(IndexSet(integer: 2), with: .none) }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let path = IndexPath(row: 0, section: 1)
+                if let cell = self.tableView.cellForRow(at: path) as? AccessibleSettingCell {
+                    cell.display(title: "重新同步對話",
+                                 detail: self.service.chatSyncStatus, button: true)
+                }
+            }
             .store(in: &subscriptions)
     }
 
-    override func numberOfSections(in tableView: UITableView) -> Int { 4 }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        [3, 2, 2, 1][section]
-    }
+    override func numberOfSections(in tableView: UITableView) -> Int { 3 }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { 1 }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        ["無障礙閱讀", "語言與翻譯", "聊天同步", "帳號"][section]
+        ["說明與協助", "聊天資料", "帳號"][section]
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt path: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "setting", for: path) as! AccessibleSettingCell
-        switch (path.section, path.row) {
-        case (0, 0):
-            cell.display(title: "訊息朗讀順序", detail: "發送者、訊息內容、發送時間")
-        case (0, 1):
-            cell.display(title: "訊息連續閱讀", detail: "接近歷史邊界時自動預先載入下一批訊息")
-        case (0, 2):
-            cell.display(title: "快速翻譯", detail: "訊息上下滑選擇翻譯成繁體中文並直接朗讀")
-        case (1, 0):
-            cell.display(title: "介面語言", detail: "繁體中文")
-        case (1, 1):
-            cell.display(title: "翻譯語言", detail: "繁體中文。手動翻譯會將文字傳送給 Google")
-        case (2, 0):
-            cell.display(title: "同步狀態", detail: service.chatSyncStatus)
-        case (2, 1):
-            cell.display(title: "重新同步對話", detail: "向 Telegram 請求聊天和群組", button: true)
+        switch path.section {
+        case 0:
+            cell.display(title: "使用指南", detail: "閱讀旁白翻頁、訊息操作、語音和翻譯說明",
+                         button: true)
+        case 1:
+            cell.display(title: "重新同步對話", detail: service.chatSyncStatus, button: true)
         default:
-            cell.display(title: "登出 Telegram", detail: "只在確認後登出目前帳號", button: true)
+            cell.display(title: "登出 Telegram", detail: "須再次確認才會登出", button: true)
         }
         return cell
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt path: IndexPath) {
         tableView.deselectRow(at: path, animated: true)
-        if path.section == 2 && path.row == 1 {
+        switch path.section {
+        case 0:
+            navigationController?.pushViewController(AccessibleHelpController(style: .insetGrouped), animated: true)
+        case 1:
             service.loadChats()
-            UIAccessibility.post(notification: .announcement, argument: "正在重新同步 Telegram 對話")
-        }
-        if path.section == 3 {
-            let alert = UIAlertController(title: "確認登出", message: "登出此裝置上的 Telegram 帳號？", preferredStyle: .alert)
+            UIAccessibility.post(notification: .announcement,
+                                 argument: "已要求重新同步 Telegram 對話")
+        default:
+            let alert = UIAlertController(title: "確認登出",
+                                          message: "登出此裝置上的 Telegram 帳號？",
+                                          preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "取消", style: .cancel))
             alert.addAction(UIAlertAction(title: "登出", style: .destructive) { [weak self] _ in
                 self?.service.logOut()
