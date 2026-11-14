@@ -67,7 +67,6 @@ struct ChatScreen: View {
             composer
         }
         .navigationTitle(service.chatTitle(chatID))
-        .accessibilityLanguage("zh-TW")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { service.open(chatID) }
         .onDisappear { service.close(chatID) }
