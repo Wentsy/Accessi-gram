@@ -134,6 +134,25 @@ final class TelegramService: ObservableObject {
     private func connect(apiID: Int, apiHash: String) {
         self.apiID = apiID
         self.apiHash = apiHash
+
+        // Do this BEFORE TDLib opens the main SQLite database. An isolated
+        // authenticated snapshot lets iOS Share Extension transmit directly
+        // without reopening the containing app or racing the live database.
+        let support = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                in: .userDomainMask)[0]
+        do {
+            try ShareSessionBootstrap.prepareBeforeMainTDLibStarts(
+                apiID: apiID,
+                apiHash: apiHash,
+                encryptionKey: KeychainAPI.databaseKey(),
+                mainDatabaseDirectory: support.appendingPathComponent("tdlib")
+            )
+        } catch {
+            // Login continues normally; share errors are shown in the extension
+            // instead of disrupting the currently signed-in account.
+            print("Share session preparation failed: \(error.localizedDescription)")
+        }
+
         clientID = td_create_client_id()
         if !receiverStarted {
             receiverStarted = true
