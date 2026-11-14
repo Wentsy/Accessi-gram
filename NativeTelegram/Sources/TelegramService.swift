@@ -810,6 +810,59 @@ final class TelegramService: ObservableObject {
         }
     }
 
+    /// BotFather /setcommands live in userFullInfo.bot_info.commands, not
+    /// in replyMarkup inline/reply keyboard buttons attached to messages.
+    func botSlashCommands(chatID: Int64,
+                          completion: @escaping ([BotSlashCommand]) -> Void) {
+        request("getChat", ["chat_id": chatID]) { [weak self] chat in
+            guard let self else { return }
+            if chat.text("@type") == "error" {
+                self.errorMessage = "無法查詢機器人指令：" + chat.text("message")
+                completion([])
+                return
+            }
+            let type = chat.object("type")
+            switch type.text("@type") {
+            case "chatTypePrivate":
+                let userID = type.number("user_id")
+                self.request("getUserFullInfo", ["user_id": userID]) { result in
+                    if result.text("@type") == "error" {
+                        self.errorMessage = "無法讀取機器人指令：" + result.text("message")
+                    }
+                    let info = result.object("bot_info")
+                    let commands = info.objects("commands")
+                    completion(commands.compactMap { raw in
+                        let name = raw.text("command").trimmingCharacters(in: .whitespaces)
+                        return name.isEmpty ? nil : BotSlashCommand(
+                            command: name, description: raw.text("description")
+                        )
+                    })
+                }
+            case "chatTypeBasicGroup", "chatTypeSupergroup":
+                let method = type.text("@type") == "chatTypeBasicGroup"
+                    ? "getBasicGroupFullInfo" : "getSupergroupFullInfo"
+                let key = type.text("@type") == "chatTypeBasicGroup"
+                    ? "basic_group_id" : "supergroup_id"
+                self.request(method, [key: type.number(key)]) { result in
+                    if result.text("@type") == "error" {
+                        self.errorMessage = "無法讀取群組機器人指令：" + result.text("message")
+                    }
+                    let commands = result.objects("bot_commands")
+                        .flatMap { $0.objects("commands") }
+                    var seen = Set<String>()
+                    completion(commands.compactMap { raw in
+                        let name = raw.text("command")
+                        guard !name.isEmpty, seen.insert(name).inserted else { return nil }
+                        return BotSlashCommand(command: name,
+                                               description: raw.text("description"))
+                    })
+                }
+            default:
+                completion([])
+            }
+        }
+    }
+
     func botAction(_ button: BotButton, message: TelegramMessage) {
         switch button.kind {
         case "inlineKeyboardButtonTypeUrl":
