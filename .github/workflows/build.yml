@@ -1,7 +1,7 @@
 name: Build Accessi gram
 on:
   push:
-    branches: [main, fix/chat-reading-modal-accessibility-0.2.6]
+    branches: [main, fix/global-pagination-and-accessible-actions-0.2.7]
   workflow_dispatch:
 permissions:
   contents: read
