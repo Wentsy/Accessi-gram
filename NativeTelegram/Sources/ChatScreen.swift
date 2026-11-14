@@ -139,7 +139,7 @@ struct ChatScreen: View {
         }
         .sheet(isPresented: $showingForward) {
             if let message = forwardMessage {
-                ForwardPicker(message: message, service: service)
+                AccessibleForwardSheet(message: message, service: service)
             }
         }
         .photosPicker(isPresented: $showPhotos, selection: $selectedPhoto, matching: .any(of: [.images, .videos]))
@@ -224,31 +224,3 @@ struct ChatScreen: View {
     }
 }
 
-struct ForwardPicker: View {
-    let message: TelegramMessage
-    @ObservedObject var service: TelegramService
-    @Environment(\.dismiss) private var dismiss
-    @State private var query = ""
-
-    private var choices: [TelegramChat] {
-        service.chats.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(choices) { chat in
-                    Button(chat.title) {
-                        service.forward(message, to: chat.id)
-                        dismiss()
-                        UIAccessibility.post(notification: .announcement,
-                                             argument: "已將訊息轉寄到 \(chat.title)")
-                    }
-                }
-            }
-            .searchable(text: $query, prompt: "搜尋要轉寄的聊天")
-            .navigationTitle("轉寄給")
-            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("取消") { dismiss() } } }
-        }
-    }
-}
