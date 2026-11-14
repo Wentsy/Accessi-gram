@@ -514,22 +514,100 @@ final class TelegramService: ObservableObject {
         command("sendMessage", args)
     }
 
-    func sendMedia(chatID: Int64, fileURL: URL, kind: String, caption: String = "") {
-        let input: JSONObject = ["@type": "inputFileLocal", "path": fileURL.path]
+    // TDLib >= 1.8.65 expects inputPhoto/inputVideo/inputVoiceNote/
+    // inputDocument containing inputFileLocal, not a raw inputFileLocal
+    // directly at the inputMessageContent level.
+    func sendMedia(chatID: Int64, fileURL: URL, kind: String,
+                   caption: String = "", duration: Int = 0) {
+        let path = fileURL.path
+        guard FileManager.default.isReadableFile(atPath: path) else {
+            errorMessage = "找不到可傳送的檔案：\(fileURL.lastPathComponent)"
+            return
+        }
+
+        let file: JSONObject = ["@type": "inputFileLocal", "path": path]
         let text: JSONObject = ["@type": "formattedText", "text": caption, "entities": []]
-        let message: JSONObject
+        let payload: JSONObject
+
         switch kind {
         case "photo":
-            message = ["@type": "inputMessagePhoto", "photo": input, "caption": text, "width": 0, "height": 0]
+            payload = [
+                "@type": "inputMessagePhoto",
+                "photo": [
+                    "@type": "inputPhoto",
+                    "photo": file,
+                    "added_sticker_file_ids": [],
+                    "width": 0, "height": 0
+                ] as JSONObject,
+                "caption": text,
+                "show_caption_above_media": false,
+                "has_spoiler": false
+            ]
         case "video":
-            message = ["@type": "inputMessageVideo", "video": input, "caption": text, "duration": 0,
-                       "width": 0, "height": 0, "supports_streaming": true]
+            payload = [
+                "@type": "inputMessageVideo",
+                "video": [
+                    "@type": "inputVideo",
+                    "video": file,
+                    "start_timestamp": 0,
+                    "added_sticker_file_ids": [],
+                    "duration": duration, "width": 0, "height": 0,
+                    "supports_streaming": true
+                ] as JSONObject,
+                "caption": text,
+                "show_caption_above_media": false,
+                "has_spoiler": false
+            ]
         case "voice":
-            message = ["@type": "inputMessageVoiceNote", "voice_note": input, "duration": 0, "waveform": ""]
+            payload = [
+                "@type": "inputMessageVoiceNote",
+                "voice_note": [
+                    "@type": "inputVoiceNote",
+                    "voice_note": file, "duration": duration, "waveform": ""
+                ] as JSONObject,
+                "caption": text
+            ]
+        case "audio":
+            payload = [
+                "@type": "inputMessageAudio",
+                "audio": [
+                    "@type": "inputAudio",
+                    "audio": file, "duration": duration, "title": "", "performer": ""
+                ] as JSONObject,
+                "caption": text
+            ]
         default:
-            message = ["@type": "inputMessageDocument", "document": input, "caption": text]
+            payload = [
+                "@type": "inputMessageDocument",
+                "document": [
+                    "@type": "inputDocument",
+                    "document": file, "disable_content_type_detection": true
+                ] as JSONObject,
+                "caption": text
+            ]
         }
-        command("sendMessage", ["chat_id": chatID, "input_message_content": message])
+
+        request("sendMessage", [
+            "chat_id": chatID, "input_message_content": payload
+        ]) { [weak self] response in
+            guard let self else { return }
+            if response.text("@type") == "error" {
+                let reason = response.text("message")
+                if kind == "voice", fileURL.pathExtension.lowercased() == "m4a",
+                   reason.localizedCaseInsensitiveContains("voice") ||
+                   reason.localizedCaseInsensitiveContains("audio") {
+                    // AAC/M4A can be sent as ordinary audio when TDLib rejects it
+                    // as a voice-note bubble. The file itself is still delivered.
+                    self.sendMedia(chatID: chatID, fileURL: fileURL,
+                                   kind: "audio", caption: caption, duration: duration)
+                } else {
+                    self.errorMessage = "附件傳送失敗：\(reason)"
+                }
+            } else if response.text("@type") == "message" {
+                UIAccessibility.post(notification: .announcement,
+                                     argument: "已提交附件，正在傳送")
+            }
+        }
     }
 
     func download(_ fileID: Int, completion: @escaping (URL?) -> Void) {
