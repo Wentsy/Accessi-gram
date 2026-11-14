@@ -81,7 +81,9 @@ final class TelegramService: ObservableObject {
                 }
             }
         }
-        command("getAuthorizationState")
+        request("getAuthorizationState") { [weak self] response in
+            self?.handleAuth(response)
+        }
     }
 
     func request(_ method: String, _ arguments: JSONObject = [:], completion: TDCallback? = nil) {
@@ -339,9 +341,11 @@ final class TelegramService: ObservableObject {
             let priorOldest = model.messages.first?.id
             model.merge(page)
             model.loading = false
-            if raw.isEmpty || (before > 0 && priorOldest == model.messages.first?.id) {
+            if raw.isEmpty && result.text("@type") != "error" {
                 model.hasMore = false
             }
+            model.paginationStallCount = (before > 0 && priorOldest == model.messages.first?.id)
+                ? model.paginationStallCount + 1 : 0
             if before == 0, let last = model.messages.last {
                 self.command("viewMessages", ["chat_id": id,
                                               "message_ids": [last.id], "force_read": true])
