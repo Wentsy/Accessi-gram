@@ -182,8 +182,8 @@ struct TelegramMessage: Identifiable, Equatable {
         if body.isEmpty { body = "空白訊息" }
 
         let markup = raw.object("reply_markup")
-        let rows = markup.objects("rows")
-        let buttons = rows.flatMap { $0 as? [JSONObject] ?? [] }
+        let rows = markup["rows"] as? [[JSONObject]] ?? []
+        let buttons = rows.flatMap { $0 }
         if markup.text("@type") == "replyMarkupInlineKeyboard" {
             self.buttons = buttons.enumerated().map { BotButton($0.element, index: $0.offset) }
             keyboardButtons = []
@@ -207,6 +207,7 @@ final class MessageThread: ObservableObject {
     @Published var translationCache: [Int64: String] = [:]
     var hasOpened = false
     var isInitialized = false
+    var paginationStallCount = 0
 
     init(chatID: Int64) { self.chatID = chatID }
 
