@@ -19,7 +19,7 @@ struct RootScreen: View {
     var body: some View {
         Group {
             if service.authStage == .ready {
-                ConversationsScreen()
+                NativeConversationsView(service: service)
             } else {
                 AuthorizationScreen()
             }
