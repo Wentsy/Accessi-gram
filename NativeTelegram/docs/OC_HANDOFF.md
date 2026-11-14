@@ -106,18 +106,13 @@ OC 請拉取同一分支 `rewrite/native-tdlib-voiceover` 的最新提交重新�
 
 本次更新保留前一版已驗證可以使用的登入、前景震動及附件上傳流程。OC 拉取分支最新版即可，**不可刪除 App 或清空 TDLib 本機資料庫**。
 
-### 1. APNs 遠端推播與 iOS 原生通知
+### 1. 背景推播已依使用者要求完全取消
 
-新增 SystemNotificationManager.swift，整合 UIApplicationDelegate、UNUserNotificationCenter 授權、registerForRemoteNotifications、APNs device token、TDLib registerDevice(deviceTokenApplePush)、processPushNotification。使用者在「設定 → iOS 系統通知」點兩下請求權限；允許後自動向 Telegram 註冊裝置。App 前景仍使用原有震動，不重覆發系統橫幅；背景或關閉 App 時依賴 iOS 原生 APNs 通知中心、鎖定畫面與系統音效，點擊通知後可開啟對應對話。
+本分支**不要求也不啟用背景 APNs 推播**。已刪除 SystemNotificationManager.swift、TDLib registerDevice／processPushNotification、授權按鈕、UIBackgroundModes remote-notification、App.entitlements 的 aps-environment、Build Script 的 TELEGRAM_APNS_SANDBOX。OC **不需要伺服器、APNs 憑證或 Push Notifications capability**。
 
-**這需要 OC 同時完成下列外部設定，僅編譯程式碼不足以保證背景推播：**
+保留已確認運作的**App 開啟時新訊息震動**（設定內可關閉），它由 TDLib updateNewMessage 與 AudioToolbox 系統震動處理，無需遠端推播。
 
-- Apple Developer 對主 App 的 App ID org.accessigram.native 開啟 Push Notifications 與 App Groups，並對 Share Extension 的 App ID org.accessigram.native.share 開啟同一個 App Group：group.org.accessigram.native。建立含這些權限的 iOS provisioning profiles，且都要由相同 Apple Team 簽名。先簽署 PlugIns 內的 .appex，再簽署主 .app。
-- 主 App 的 Resources/App.entitlements 已提供 aps-environment=development。若使用正式發行描述檔，必須改成 production 並使用生產環境 APNs token；不可以用開發環境 token 註冊生產環境，反之亦然。
-- Bundle 的 TelegramAPNsIsSandbox 必須與 provision profile 匹配。build.sh 支援 `TELEGRAM_APNS_SANDBOX=YES` (開發) 或 `TELEGRAM_APNS_SANDBOX=NO` (正式) 注入 Info.plist，預設 false。
-- **Telegram API 應用在 my.telegram.org 必須配置相容的 Apple 推播憑證／伺服器驗證資料**。這是 Telegram 向 Apple 發送 APNs 所需的服務端憑證，不能單靠 App 端自行產生，也不能借用官方 Telegram 的推播資格。
-- 正式的遠端通知聲音由 Telegram APNs payload 及 iOS 通知設定決定；本版使用 iOS 系統原生音效，不虛設無法生效的「任選 iOS 原生通知音」選單。使用者可透過 iOS 設定調整允許通知、聲音及顯示方式。
-- 如果使用的個人簽署方案不支援 Push Notifications / App Groups，就無法保證 App 關閉後收到系統推播。前景震動不受此影響。App 被使用者強制結束後，iOS 不保證會喚醒它處理背景 silent push；若遠端 alert push 配置正確，系統仍可顯示通知。
+Share Extension 仍然需要 App Groups 權限，這和 APNs 完全是不同的能力。主 App / Share Extension 的 Bundle ID 與 App Group 需由相同 Apple Team 簽名。
 
 ### 2. 語音訊息：OGG／Opus 原生播放
 
@@ -142,7 +137,7 @@ Apple 的 Share Extension 可以直接進行網路傳輸，但無法保證主 Ap
 
 ### 4. VoiceOver 選單與鍵盤收合
 
-訊息操作、機器人互動、表情回應的 SwiftUI confirmationDialog 由 AccessibleChoiceSheet.swift 的原生 UIKit UITableView 取代，每個選項具有獨立繁體中文 VoiceOver 焦點、標籤及操作提示。音訊播放器和一般文件亦改為 UIKit。
+訊息操作、機器人互動、表情回應現在改用 AccessibleSystemMenu.swift 的真正 UIKit UIAlertController action sheet，由 iOS 系統處理 VoiceOver 焦點與操作；已刪除無法觸摸／朗讀的 AccessibleChoiceSheet。圖片、影片、語音與一般檔案統一使用 AccessibleMediaSheet.swift 原生 UIKit 頁面，避免舊 SwiftUI MediaViewer 空白。
 
 輸入文字後點傳送**不收鍵盤**，方便連續輸入；用 VoiceOver 左右滑從輸入列回到任一訊息時，該訊息取得焦點後自動收鍵盤，不強制跳開訊息焦點；在編輯框空白時點錄音，也會先收起鍵盤。
 
@@ -156,15 +151,25 @@ Apple 的 Share Extension 可以直接進行網路傳輸，但無法保證主 Ap
 cd Accessi-gram/NativeTelegram
 TELEGRAM_API_ID="$MY_TG_API_ID" \
 TELEGRAM_API_HASH="$MY_TG_API_HASH" \
-TELEGRAM_APNS_SANDBOX=YES \
 bash scripts/build.sh
 ```
 
-上述 YES 僅適用開發型 APNs 描述檔，生產簽名須改用 NO，並讓 App.entitlements 的 aps-environment 與描述檔一致。此腳本提供**未簽名 IPA**，**不會自動申請 APNs 金鑰、不會向 Telegram 註冊服務端憑證、也不會替 OC 建立 Apple App Groups 能力**。IPA 內需有 PlugIns/AccessiGramShareExtension.appex。維持 main Bundle ID、Keychain、TDLib 路徑不變；請勿讓簽名或 app group 設定改變既有帳號容器。App 與 extension 的 CFBundleVersion 已由 CURRENT_PROJECT_VERSION 控制，OC 可照原有流程自動遞增，不需把尾碼寫死。
+此腳本提供**未簽名 IPA**。背景 APNs 整組已移除，不需要 Push Notifications capability、推播伺服器或憑證。**Share Extension 仍須有效 App Groups 權限**，OC 需正確簽署。IPA 內需有 PlugIns/AccessiGramShareExtension.appex。維持 main Bundle ID、Keychain、TDLib 路徑不變；請勿讓簽名或 app group 設定改變既有帳號容器。App 與 extension 的 CFBundleVersion 已由 CURRENT_PROJECT_VERSION 控制，OC 可照原有流程自動遞增，不需把尾碼寫死。
 
-**狀態：** 原始碼已提交，但此環境未執行 Xcode 編譯及真機檢查，因此語音播放、背景 APNs、Share Extension 與全螢幕修正不能宣稱已實測成功。由 OC 拉取最新提交後依 Apple 簽署能力和 Telegram 憑證進行打包。
+**狀態：** 原始碼已提交，但此環境未執行 Xcode 編譯及真機檢查，因此語音播放、Share Extension 與全螢幕修正不能宣稱已實測成功。由 OC 拉取最新提交後依 Apple 簽署能力和 Telegram 憑證進行打包。
 
 
 ### 2026-11-14 最新覆蓋說明：直接分享已取代舊版暫存流程
 
-舊版文件與說明中「分享後要再手動打開 App」「分享成功僅代表暫存」已作廢。OC 應以此段及上方最新版第 3 節為準。此修改與上個尚未測試版本的 APNs、OGG/Opus 語音播放器、UIKit 選單、鍵盤收合、LaunchScreen 全螢幕修復一起留在 **rewrite/native-tdlib-voiceover**。請一次拉取分支最新提交打包，不需要中間版本。此環境沒有 Xcode／實機環境，不能把程式碼提交等同確認真機送出成功。
+舊版文件與說明中「分享後要再手動打開 App」「分享成功僅代表暫存」已作廢。OC 應以此段及上方最新版第 3 節為準。此修改與上個尚未測試版本的 OGG/Opus 語音播放器、UIKit 選單、鍵盤收合、LaunchScreen 全螢幕修復一起留在 **rewrite/native-tdlib-voiceover**。請一次拉取分支最新提交打包，不需要中間版本。此環境沒有 Xcode／實機環境，不能把程式碼提交等同確認真機送出成功。
+
+## 2026-11-15：iOS 18.7.8 實機回報統整修正（此節優先於舊交接）
+
+1. **分享找不到聯絡人**：不再要求主 App 預先匯出手機聯絡人。ShareRecipientPicker 直接呼叫 ExtensionTelegramSender.recentRecipients()；該方法先讓 TDLib 載入 Main Chat List，再 getChats(limit=100)，逐一 getChat 取標題，顯示最近私聊／群組／頻道，並保留本機快取供下次即刻顯示。只有分享專用 TDLib 登入不存在或失效時才顯示明確錯誤，而非永遠提示「請同步聯絡人」。
+2. **傳送檔案按「打開」完全沒反應**：SwiftUI fileImporter 已移除，換成 AccessibleDocumentPicker.swift 包裝 UIKit UIDocumentPickerViewController (asCopy: true)，由 UIDocumentPickerDelegate.documentPicker(didPickDocumentsAt:) 取得 iOS 18 的文件 URL。App 自有的暫存檔直接複製，外部檔案提供者才使用 NSFileCoordinator＋Security Scope。選取後立即以旁白宣告準備階段，TDLib 接受後才說明傳送中，錯誤明確顯示。
+3. **機器人和所有更多選單空白**：移除 AccessibleChoiceSheet.swift（舊的 UIViewControllerRepresentable／巢狀 sheet）；現在訊息操作、機器人互動、表情回應、編輯文字皆透過 AccessibleSystemMenu.swift 的 iOS 原生 UIAlertController 呈現。附件／語音／影片／照片改成 AccessibleMediaSheet.swift 原生 UIKit 容器，移除過時 SwiftUI MediaViewer。分享收件人與轉寄仍使用 UIKit UITableView，每個聊天是有名稱的單一可點擊元素。
+4. **訊息最後出現「垂直捲軸，14頁，100%」且無法滑到輸入列**：AccessibleMessageTimeline.swift 取消可聚焦的捲軸可視指示器，新增 MessageTailRedirect 作為表格最尾端的焦點轉接；VoiceOver 到最新訊息後，接著移到 ComposerBarView 的真實「傳送照片或影片」，下一步才是「傳送檔案或附件」「訊息編輯框」。不改既有歷史翻頁／錨點保留方式。
+5. **背景推播取消**：刪除所有 APNs 請求、系統通知設定入口、裝置 token 註冊及推播 entitlement；只保留有用的 App 前景新訊息震動。
+6. **不改登入**：保留原本的主 App Bundle ID、Keychain、TDLib database 路徑與已登入帳號；OC 直接更新同一分支最新 commit 覆蓋安裝。Share Extension 仍需要和主 App 同一 Team 的 App Groups entitlement，但不需要任何私人推播伺服器。
+
+依使用者指示，此處只提交原始碼給 OC，沒有做 Xcode 編譯或回歸／防禦性測試，不得以本次提交宣稱 iOS 18.7.8 實機已驗證。主分支 main 未動。
