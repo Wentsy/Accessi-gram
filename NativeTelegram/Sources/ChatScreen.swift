@@ -40,6 +40,7 @@ struct ChatScreen: View {
                     .accessibilityLabel("正在載入訊息")
             }
             Divider()
+                .accessibilityHidden(true)
             if let reply = thread.replyTo {
                 AccessibleReplyBanner(sender: reply.sender, content: reply.body) {
                     thread.replyTo = nil
