@@ -85,7 +85,6 @@ final class ComposerBarView: UIView, UITextViewDelegate {
         editor.accessibilityHint = "點兩下開始輸入聊天訊息，輸入完成後移至傳送按鈕"
         editor.accessibilityLanguage = "zh-TW"
         editor.isAccessibilityElement = true
-        editor.accessibilityTraits = [.allowsDirectInteraction]
 
         placeholder.text = "輸入訊息"
         placeholder.font = .preferredFont(forTextStyle: .body)
