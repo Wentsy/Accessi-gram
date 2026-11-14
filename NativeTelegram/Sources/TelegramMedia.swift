@@ -127,12 +127,8 @@ struct MediaViewer: View {
                     switch message.fileKind {
                     case "photo":
                         if let image = UIImage(contentsOfFile: localURL.path) {
-                            GeometryReader { geometry in
-                                Image(uiImage: image)
-                                    .resizable().scaledToFit()
-                                    .frame(maxWidth: geometry.size.width, maxHeight: geometry.size.height)
-                                    .accessibilityLabel(message.body)
-                            }
+                            AccessiblePhotoPreview(image: image, description: message.body)
+                                .accessibilityHidden(false)
                         } else {
                             Text("無法開啟照片")
                         }
@@ -140,14 +136,11 @@ struct MediaViewer: View {
                         VideoPlayer(player: AVPlayer(url: localURL))
                             .accessibilityLabel(message.body)
                     case "voice", "audio":
-                        VStack(spacing: 24) {
-                            Text(message.body)
-                            Button(recorder.isPlaying ? "暫停播放" : "播放音訊") {
-                                if recorder.isPlaying { recorder.pause() }
-                                else { recorder.play(localURL) }
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
+                        AccessibleAudioPlayback(
+                            description: message.body,
+                            url: localURL,
+                            recorder: recorder
+                        )
                     default:
                         VStack {
                             Text(message.body)
@@ -176,4 +169,99 @@ struct MediaViewer: View {
             }
         }
     }
+}
+
+
+struct AccessiblePhotoPreview: UIViewRepresentable {
+    let image: UIImage
+    let description: String
+
+    func makeUIView(context: Context) -> UIImageView {
+        let view = UIImageView()
+        view.contentMode = .scaleAspectFit
+        view.isAccessibilityElement = true
+        view.accessibilityTraits = .image
+        view.accessibilityLanguage = "zh-TW"
+        return view
+    }
+
+    func updateUIView(_ view: UIImageView, context: Context) {
+        view.image = image
+        view.accessibilityLabel = "照片，\(description)"
+    }
+}
+
+/// Native playback button and metadata for predictable VoiceOver focus.
+struct AccessibleAudioPlayback: UIViewRepresentable {
+    let description: String
+    let url: URL
+    @ObservedObject var recorder: VoiceRecorder
+
+    func makeUIView(context: Context) -> NativeAudioPlaybackView {
+        NativeAudioPlaybackView()
+    }
+
+    func updateUIView(_ view: NativeAudioPlaybackView, context: Context) {
+        view.configure(description: description, isPlaying: recorder.isPlaying) {
+            if recorder.isPlaying {
+                recorder.pause()
+            } else {
+                recorder.play(url)
+            }
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize,
+                      uiView: NativeAudioPlaybackView,
+                      context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 375, height: 112)
+    }
+}
+
+final class NativeAudioPlaybackView: UIView {
+    private let titleLabel = UILabel()
+    private let playButton = UIButton(type: .system)
+    private var onToggle: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = false
+        titleLabel.font = .preferredFont(forTextStyle: .body)
+        titleLabel.adjustsFontForContentSizeCategory = true
+        titleLabel.textAlignment = .center
+        titleLabel.numberOfLines = 2
+        titleLabel.accessibilityLanguage = "zh-TW"
+        titleLabel.isAccessibilityElement = true
+        playButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+        playButton.accessibilityLanguage = "zh-TW"
+        playButton.accessibilityTraits = .button
+        playButton.addTarget(self, action: #selector(toggle), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [titleLabel, playButton])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            playButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        ])
+        accessibilityElements = [titleLabel, playButton]
+    }
+
+    required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
+
+    func configure(description: String, isPlaying: Bool, onToggle: @escaping () -> Void) {
+        titleLabel.text = description
+        titleLabel.accessibilityLabel = description
+        playButton.setTitle(isPlaying ? "暫停播放" : "播放音訊", for: .normal)
+        playButton.accessibilityLabel = isPlaying ? "暫停播放音訊" : "播放音訊"
+        playButton.accessibilityHint = isPlaying ? "點兩下暫停" : "點兩下開始播放"
+        self.onToggle = onToggle
+    }
+
+    @objc private func toggle() { onToggle?() }
 }
