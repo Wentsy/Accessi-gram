@@ -324,7 +324,7 @@ public func AGStart() {
     installSupplementalControls()
     installChat()
     installHistoryReading()
-    NSLog("[Accessi gram] 0.2.6 loaded; installed %ld target hooks", installed.count)
+    NSLog("[Accessi gram] 0.2.7 loaded; installed %ld target hooks", installed.count)
 }
 
 private func objectField(_ object: Any, _ name: String) -> NSObject? {
@@ -527,15 +527,39 @@ private func modalElements(_ root: UIView, node: NSObject) -> NSArray? {
         if field(action, "actionEnabled") as? Bool == false {
             element.accessibilityTraits.insert(.notEnabled)
         }
+        if let selected = item.flatMap({ field($0, "value") as? Bool }) ??
+                          item.flatMap({ field($0, "isOn") as? Bool }), selected {
+            element.accessibilityTraits.insert(.selected)
+        }
         element.accessibilityFrameInContainerSpace = root.convert(button.bounds, from: button)
         element.activate = { [weak action] in
             guard let action, field(action, "actionEnabled") as? Bool != false else { return false }
+            // performAction is a Swift-only method on some nodes. Tap handlers are @objc.
+            let name = className(action)
+            if name == "_TtC7Display26TextAlertContentActionNode" {
+                return send(action, "pressed")
+            }
+            if name.hasPrefix("_TtC7Display") && name.contains("ActionSheet") {
+                return send(action, "buttonPressed")
+            }
             return send(action, "performAction")
         }
         result.append(element)
     }
     cache.actions = cache.actions.filter { active.contains($0.key) }
-    return result.isEmpty ? nil : result as NSArray
+    // Preserve real text fields in confirmation dialogs rather than replacing them.
+    let editors = descendants(root).filter { $0 is UITextField || $0 is UITextView }
+        .filter { visible($0, in: root) && !$0.bounds.isEmpty }
+    let full = (result + editors).sorted { left, right in
+        func y(_ object: Any) -> CGFloat {
+            if let view = object as? UIView {
+                return root.convert(view.bounds, from: view).midY
+            }
+            return (object as? UIAccessibilityElement)?.accessibilityFrameInContainerSpace.midY ?? 0
+        }
+        return y(left) < y(right)
+    }
+    return full.isEmpty ? nil : full as NSArray
 }
 
 private func installOverlayViews() {
@@ -1209,6 +1233,17 @@ private func installSupplementalControls() {
         guard let action = field($0, "action") else { return nil }
         return field(action, "title") as? String
     })
+    for name in ["_TtC7Display21ActionSheetButtonNode",
+                 "_TtC7Display27ActionSheetCheckboxItemNode",
+                 "_TtC7Display21ActionSheetSwitchNode"] {
+        installButton(name, action: { send($0, "buttonPressed") },
+                      label: { field($0, "item").flatMap { field($0, "title") as? String } },
+                      selected: { object in
+                          let item = field(object, "item")
+                          return item.flatMap { field($0, "value") as? Bool } ??
+                                 item.flatMap { field($0, "isOn") as? Bool } ?? false
+                      })
+    }
     installButton("_TtC15ShareControllerP33_8BC0A62A8A0E545842FF4152006F0A2216CancelButtonNode", action: {
         nearestNode(nodeView($0), matching: "_TtC15ShareController19ShareControllerNode").map { send($0, "cancelButtonPressed") } ?? false
     }, label: { text(field($0, "labelNode")) ?? "關閉分享" })
