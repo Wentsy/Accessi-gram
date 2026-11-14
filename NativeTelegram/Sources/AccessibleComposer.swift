@@ -32,6 +32,12 @@ struct AccessibleComposer: UIViewRepresentable {
 }
 
 final class ComposerBarView: UIView, UITextViewDelegate {
+    static weak var active: ComposerBarView?
+
+    func focusFirstAttachment() {
+        UIAccessibility.post(notification: .layoutChanged, argument: photo)
+    }
+
     var onTextChanged: ((String) -> Void)?
     var onPhotos: (() -> Void)?
     var onFiles: (() -> Void)?
@@ -49,6 +55,7 @@ final class ComposerBarView: UIView, UITextViewDelegate {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        ComposerBarView.active = self
         isAccessibilityElement = false
         backgroundColor = .secondarySystemBackground
 
