@@ -23,3 +23,12 @@
 - 保留 iOS 18 的相鄰文字導覽與 Read All 列表翻頁處理，但不保證網路未載入歷史時能無限連讀。
 - TextAlertContentNode 的 actionNodes、ActionSheetButtonNode 等採用固定 AX 元素，直接執行原生 performAction。
 - 沒有 iPhone 實機，不能聲稱 VoiceOver 行為已實測；需由 OC 編譯與使用者檢查。
+
+## 0.2.7 全域清單接續閱讀
+
+- 從已測試改善的 0.2.6 延伸；保留聊天專屬 HistoryViewport，新增非聊天用的 GlobalPaginationState 及 prepareGlobalPagination。
+- 原生 ListViewBackingView 使用可見 itemNodes 判定接近頂／底邊界，依前一焦點判斷方向並預先滾動；監聽佈局變更可在載入新資料時繼續露出內容。
+- 一般垂直 UIScrollView、UITableViewCell、UICollectionViewCell、UILabel、UIButton 上的可讀內容會進行保留焦點的短距離預讀。輸入框不參與。
+- 原生翻頁（含三指手勢）仍保留；不強迫移動目前的 VoiceOver 焦點。
+- 警告：後端若未取得下一批資料，單靠客戶端不能保證自動載入；請以實機操作評估。
+- 原生自訂 AlertController action 使用 `pressed`、ActionSheet item 使用 `buttonPressed`，避免呼叫 Swift-only `performAction` 導致不可點擊。
