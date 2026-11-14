@@ -42,7 +42,7 @@ final class AccessibleHelpController: UITableViewController {
             Topic(title: "前景震動",
                   explanation: "App 開啟期間收到新訊息會震動，設定可選擇開啟或關閉；載入舊訊息與自己送出的訊息不會觸發。"),
             Topic(title: "從其他 App 分享",
-                  explanation: "在其他 App 的分享介面選擇 Accessi Gram，先選擇聯絡人或群組，再輸入說明文字。Share Extension 會先將檔案安全暫存；請再次開啟 Accessi Gram，才會自動送出。iOS 不允許一般分享延伸功能任意強制啟動主 App。")
+                  explanation: "在其他 App 的分享介面選擇 Accessi Gram，先選擇聯絡人或群組，再輸入說明文字。Share Extension 會直接連線 Telegram 並傳送，收到伺服器確認成功後才結束分享視窗，不需要再開啟主 App。首次更新後要開啟新版 Accessi Gram 一次，建立分享專用的登入資料。分享大型影片時請保持分享視窗開啟。")
         ]),
         ("其他", [
             Topic(title: "登入與同步",
