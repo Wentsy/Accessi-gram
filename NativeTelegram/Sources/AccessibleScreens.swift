@@ -134,17 +134,6 @@ final class AccessibleConversationsController: UIViewController, UITableViewDele
                 self?.refreshRows()
             }
             .store(in: &subscriptions)
-        service.$notificationChatID.receive(on: DispatchQueue.main)
-            .sink { [weak self] chatID in
-                guard let self, let chatID else { return }
-                self.service.notificationChatID = nil
-                let screen = UIHostingController(rootView: ChatScreen(chatID: chatID))
-                screen.title = self.service.chatTitle(chatID)
-                self.navigationController?.pushViewController(screen, animated: true)
-                UIAccessibility.post(notification: .screenChanged,
-                                     argument: "已開啟通知的聊天室")
-            }
-            .store(in: &subscriptions)
         updateStatus()
         refreshRows()
         if service.chats.isEmpty { service.loadChats() }
@@ -283,16 +272,6 @@ final class AccessibleSettingsController: UITableViewController {
 
         // Update visible status in place rather than reloading a whole section
         // and displacing a VoiceOver cursor in the middle of the page.
-        service.$systemNotificationStatus.receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                let path = IndexPath(row: 0, section: 0)
-                if let cell = self?.tableView.cellForRow(at: path) as? AccessibleSettingCell {
-                    cell.display(title: "iOS 系統通知",
-                                 detail: status + "，點兩下開啟權限或調整通知",
-                                 button: true)
-                }
-            }
-            .store(in: &subscriptions)
         service.$chatSyncStatus.receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
@@ -308,7 +287,7 @@ final class AccessibleSettingsController: UITableViewController {
     override func numberOfSections(in tableView: UITableView) -> Int { 4 }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        section == 0 ? 2 : 1
+        1
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
@@ -319,18 +298,9 @@ final class AccessibleSettingsController: UITableViewController {
         let cell = tableView.dequeueReusableCell(withIdentifier: "setting", for: path) as! AccessibleSettingCell
         switch path.section {
         case 0:
-            if path.row == 0 {
-                cell.display(title: "iOS 系統通知",
-                             detail: service.systemNotificationStatus + "，點兩下開啟權限或調整通知",
-                             button: true)
-            } else {
-                cell.display(
-                    title: "App 開啟時新訊息震動",
-                    detail: service.foregroundVibrationEnabled
-                        ? "已開啟，點兩下關閉" : "已關閉，點兩下開啟",
-                    button: true
-                )
-            }
+            cell.display(title: "App 開啟時新訊息震動",
+                         detail: service.foregroundVibrationEnabled ? "已開啟，點兩下關閉" : "已關閉，點兩下開啟",
+                         button: true)
         case 1:
             cell.display(title: "使用指南", detail: "閱讀旁白翻頁、訊息操作、語音和翻譯說明",
                          button: true)
@@ -346,24 +316,14 @@ final class AccessibleSettingsController: UITableViewController {
         tableView.deselectRow(at: path, animated: true)
         switch path.section {
         case 0:
-            if path.row == 0 {
-                SystemNotificationManager.shared.requestPermission()
-            } else {
-                service.toggleForegroundVibration()
-                if let cell = tableView.cellForRow(at: path) as? AccessibleSettingCell {
-                    cell.display(
-                        title: "App 開啟時新訊息震動",
-                        detail: service.foregroundVibrationEnabled
-                            ? "已開啟，點兩下關閉" : "已關閉，點兩下開啟",
-                        button: true
-                    )
-                }
-                UIAccessibility.post(
-                    notification: .announcement,
-                    argument: service.foregroundVibrationEnabled
-                        ? "新訊息震動已開啟" : "新訊息震動已關閉"
-                )
+            service.toggleForegroundVibration()
+            if let cell = tableView.cellForRow(at: path) as? AccessibleSettingCell {
+                cell.display(title: "App 開啟時新訊息震動",
+                             detail: service.foregroundVibrationEnabled ? "已開啟，點兩下關閉" : "已關閉，點兩下開啟",
+                             button: true)
             }
+            UIAccessibility.post(notification: .announcement,
+                argument: service.foregroundVibrationEnabled ? "新訊息震動已開啟" : "新訊息震動已關閉")
         case 1:
             navigationController?.pushViewController(AccessibleHelpController(style: .insetGrouped), animated: true)
         case 2:
