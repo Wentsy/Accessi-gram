@@ -57,7 +57,7 @@ struct ChatScreen: View {
         .onAppear { service.open(chatID) }
         .onDisappear { service.close(chatID) }
         .sheet(item: $mediaMessage) { message in
-            MediaViewer(message: message, service: service, recorder: voice)
+            AccessibleMediaSheet(message: message, service: service)
         }
         .sheet(isPresented: $showingForward) {
             if let message = forwardMessage {
