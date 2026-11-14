@@ -10,6 +10,7 @@ struct ChatScreen: View {
     @State private var draft = ""
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var showFiles = false
+    @State private var showPhotos = false
     @State private var menuMessage: TelegramMessage?
     @State private var showingMessageMenu = false
     @State private var botMessage: TelegramMessage?
@@ -66,6 +67,7 @@ struct ChatScreen: View {
             composer
         }
         .navigationTitle(service.chatTitle(chatID))
+        .accessibilityLanguage("zh-TW")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { service.open(chatID) }
         .onDisappear { service.close(chatID) }
@@ -141,6 +143,7 @@ struct ChatScreen: View {
                 ForwardPicker(message: message, service: service)
             }
         }
+        .photosPicker(isPresented: $showPhotos, selection: $selectedPhoto, matching: .any(of: [.images, .videos]))
         .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) {
             result in
             guard case let .success(urls) = result else { return }
@@ -178,54 +181,35 @@ struct ChatScreen: View {
     }
 
     private var composer: some View {
-        VStack(spacing: 4) {
-            HStack(alignment: .bottom, spacing: 10) {
-                PhotosPicker(selection: $selectedPhoto, matching: .any(of: [.images, .videos])) {
-                    Image(systemName: "photo.on.rectangle")
-                }
-                .accessibilityLabel("傳送照片或影片")
-
-                Button { showFiles = true } label: {
-                    Image(systemName: "paperclip")
-                }
-                .accessibilityLabel("傳送檔案或附件")
-
-                TextField("輸入訊息", text: $draft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...5)
-                    .accessibilityLabel("訊息編輯框")
-
-                if voice.isRecording {
-                    Button {
-                        if let url = voice.stop() {
-                            service.sendMedia(chatID: chatID, fileURL: url, kind: "voice")
+        VStack(spacing: 0) {
+            AccessibleComposer(
+                text: $draft,
+                isRecording: voice.isRecording,
+                onPhotos: { showPhotos = true },
+                onFiles: { showFiles = true },
+                onAction: {
+                    if voice.isRecording {
+                        if let recording = voice.stop() {
+                            service.sendMedia(chatID: chatID, fileURL: recording, kind: "voice")
+                            UIAccessibility.post(notification: .announcement,
+                                                 argument: "已提交語音訊息，正在傳送")
                         }
-                    } label: { Label("停止並傳送", systemImage: "stop.circle.fill") }
-                    .labelStyle(.iconOnly)
-                    Button { voice.cancel() } label: { Label("取消錄音", systemImage: "xmark.circle") }
-                        .labelStyle(.iconOnly)
-                } else if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button { sendDraft() } label: { Label("傳送", systemImage: "arrow.up.circle.fill") }
-                        .labelStyle(.iconOnly)
-                        .accessibilityHint("傳送文字訊息")
-                } else {
-                    Button { voice.start() } label: {
-                        Image(systemName: "mic.fill")
+                    } else if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        sendDraft()
+                    } else {
+                        voice.start()
                     }
-                    .accessibilityLabel("開始錄製語音訊息")
-                }
-            }
-            .buttonStyle(.borderless)
-            .font(.title3)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+                },
+                onCancelRecording: { voice.cancel() }
+            )
             if keyboardMessage != nil {
                 Button("展開機器人鍵盤") {
                     botMessage = keyboardMessage
                     showingBotMenu = true
                 }
-                .font(.footnote)
-                .padding(.bottom, 4)
+                .accessibilityLabel("展開機器人互動選單")
+                .accessibilityHint("點兩下選擇機器人提供的選項")
+                .padding(.bottom, 5)
             }
         }
         .background(Color(uiColor: .secondarySystemBackground))
