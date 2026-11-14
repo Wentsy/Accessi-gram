@@ -165,3 +165,66 @@ final class ComposerBarView: UIView, UITextViewDelegate {
     @objc private func performAction() { onAction?() }
     @objc private func cancelRecording() { onCancelRecording?() }
 }
+
+
+struct AccessibleReplyBanner: UIViewRepresentable {
+    let sender: String
+    let content: String
+    let onCancel: () -> Void
+
+    func makeUIView(context: Context) -> ReplyBannerView { ReplyBannerView() }
+
+    func updateUIView(_ view: ReplyBannerView, context: Context) {
+        view.configure(sender: sender, content: content, onCancel: onCancel)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: ReplyBannerView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 375, height: 48)
+    }
+}
+
+final class ReplyBannerView: UIView {
+    private let label = UILabel()
+    private let cancel = UIButton(type: .system)
+    private var onCancel: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = false
+        backgroundColor = .secondarySystemBackground
+        label.numberOfLines = 1
+        label.font = .preferredFont(forTextStyle: .footnote)
+        label.adjustsFontForContentSizeCategory = true
+        label.isAccessibilityElement = true
+        label.accessibilityLanguage = "zh-TW"
+        cancel.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
+        cancel.accessibilityLabel = "取消回覆"
+        cancel.accessibilityLanguage = "zh-TW"
+        cancel.accessibilityTraits = .button
+        cancel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        cancel.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        let stack = UIStackView(arrangedSubviews: [label, cancel])
+        stack.axis = .horizontal
+        stack.spacing = 8
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+        accessibilityElements = [label, cancel]
+    }
+
+    required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
+
+    func configure(sender: String, content: String, onCancel: @escaping () -> Void) {
+        self.onCancel = onCancel
+        label.text = "回覆 \(sender)：\(content)"
+        label.accessibilityLabel = "正在回覆 \(sender)，\(content)"
+    }
+
+    @objc private func cancelTapped() { onCancel?() }
+}
