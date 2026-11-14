@@ -1,8 +1,7 @@
 import Foundation
 
-/// The extension cannot read the containing app's sandbox or its private
-/// Keychain records. It needs its own authorized TDLib directory in a genuine
-/// App Group container; a normal app launch alone doesn't create that.
+/// The iOS Share Extension signs into Telegram independently, using its own
+/// sandbox and TDLib database. No App Group entitlement or container is needed.
 struct ShareSessionConfiguration: Codable {
     let apiID: Int
     let apiHash: String
@@ -10,130 +9,71 @@ struct ShareSessionConfiguration: Codable {
 }
 
 enum ShareSessionError: LocalizedError {
-    case groupUnavailable
-    case mainDatabaseUnavailable
-    case snapshotFailed(String)
-    case configurationMissing
+    case missingAPICredentials
 
     var errorDescription: String? {
         switch self {
-        case .groupUnavailable:
-            return "App Group 權限不存在。請 OC 確認主 App 和分享延伸功能的簽名都包含 group.org.accessigram.native；單純開啟 App 無法修復缺少的簽署權限。"
-        case .mainDatabaseUnavailable:
-            return "找不到主 App 的 TDLib 登入資料庫。請先完成登入；新版 App 會在授權完成後自動建立分享登入。"
-        case .snapshotFailed(let detail):
-            return "無法建立分享登入副本：\(detail)"
-        case .configurationMissing:
-            return "分享登入資料尚未建立，請先開啟已登入的 Accessi Gram。若持續出現，請檢查 App Group 簽署權限。"
+        case .missingAPICredentials:
+            return "分享功能需要自己的 Telegram API ID 和 API Hash。首次使用時輸入一次，或請 OC 在分享延伸功能的 Info.plist 一起預置。"
         }
     }
 }
 
 enum ShareSessionBootstrap {
-    static var groupRoot: URL? {
-        FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: ShareMailbox.appGroup
-        )
+    static var root: URL {
+        FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        )[0].appendingPathComponent("AccessiGramShare", isDirectory: true)
     }
 
     static var databaseDirectory: URL {
-        (groupRoot ?? FileManager.default.temporaryDirectory)
-            .appendingPathComponent("share-tdlib", isDirectory: true)
+        root.appendingPathComponent("tdlib", isDirectory: true)
     }
 
     static var filesDirectory: URL {
-        (groupRoot ?? FileManager.default.temporaryDirectory)
-            .appendingPathComponent("share-files", isDirectory: true)
+        root.appendingPathComponent("files", isDirectory: true)
     }
 
     static var configURL: URL {
-        (groupRoot ?? FileManager.default.temporaryDirectory)
-            .appendingPathComponent("share-session.json")
-    }
-
-    static func status() -> String {
-        guard groupRoot != nil else {
-            return "分享功能無法使用：缺少 App Group 簽署權限"
-        }
-        guard FileManager.default.fileExists(atPath: configURL.path),
-              FileManager.default.fileExists(atPath: databaseDirectory.path)
-        else {
-            return "分享登入資料尚未建立"
-        }
-        return "分享登入副本已準備，可在其他 App 的分享選單使用"
-    }
-
-    static func clearAuthorization() {
-        guard let root = groupRoot else { return }
-        let manager = FileManager.default
-        for file in [configURL, databaseDirectory, filesDirectory,
-                     root.appendingPathComponent("recipients.json"),
-                     root.appendingPathComponent("pending-shares"),
-                     root.appendingPathComponent("shared-uploads")] {
-            try? manager.removeItem(at: file)
-        }
+        root.appendingPathComponent("telegram-config.json")
     }
 
     static func configuration() throws -> ShareSessionConfiguration {
-        guard groupRoot != nil else { throw ShareSessionError.groupUnavailable }
-        guard FileManager.default.fileExists(atPath: configURL.path),
-              FileManager.default.fileExists(atPath: databaseDirectory.path)
-        else { throw ShareSessionError.configurationMissing }
-        let data = try Data(contentsOf: configURL)
-        return try JSONDecoder().decode(ShareSessionConfiguration.self, from: data)
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            return try JSONDecoder().decode(
+                ShareSessionConfiguration.self, from: Data(contentsOf: configURL)
+            )
+        }
+
+        let info = Bundle.main.infoDictionary ?? [:]
+        let idText = (info["TelegramAPIID"] as? String)
+            ?? "\(info["TelegramAPIID"] as? Int ?? 0)"
+        let hash = (info["TelegramAPIHash"] as? String) ?? ""
+        guard let id = Int(idText), id > 0, !hash.isEmpty else {
+            throw ShareSessionError.missingAPICredentials
+        }
+        return try saveCredentials(apiID: id, apiHash: hash)
     }
 
-    /// Safe to call repeatedly. An initial attempt may find no database if
-    /// this is the first-ever login; authorizationStateReady retries it.
     @discardableResult
-    static func prepareBeforeMainTDLibStarts(
-        apiID: Int,
-        apiHash: String,
-        encryptionKey: String,
-        mainDatabaseDirectory: URL
-    ) throws -> String {
+    static func saveCredentials(apiID: Int, apiHash: String) throws -> ShareSessionConfiguration {
         let manager = FileManager.default
-        guard let root = groupRoot else { throw ShareSessionError.groupUnavailable }
         try manager.createDirectory(at: root, withIntermediateDirectories: true)
-
-        if manager.fileExists(atPath: configURL.path),
-           manager.fileExists(atPath: databaseDirectory.path) {
-            return status()
-        }
-
-        guard manager.fileExists(atPath: mainDatabaseDirectory.path) else {
-            throw ShareSessionError.mainDatabaseUnavailable
-        }
-
-        if !manager.fileExists(atPath: databaseDirectory.path) {
-            let staging = root.appendingPathComponent(
-                "share-tdlib-" + UUID().uuidString, isDirectory: true
-            )
-            do {
-                try manager.copyItem(at: mainDatabaseDirectory, to: staging)
-                try manager.moveItem(at: staging, to: databaseDirectory)
-            } catch {
-                try? manager.removeItem(at: staging)
-                throw ShareSessionError.snapshotFailed(error.localizedDescription)
-            }
-        }
-
-        try manager.createDirectory(at: filesDirectory, withIntermediateDirectories: true)
+        let key = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
+            .base64EncodedString()
         let config = ShareSessionConfiguration(
-            apiID: apiID,
-            apiHash: apiHash,
-            encryptionKey: encryptionKey
+            apiID: apiID, apiHash: apiHash, encryptionKey: key
         )
-        let data = try JSONEncoder().encode(config)
-        try data.write(to: configURL, options: .atomic)
+        let bytes = try JSONEncoder().encode(config)
+        try bytes.write(to: configURL, options: .atomic)
         try manager.setAttributes(
             [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
             ofItemAtPath: configURL.path
         )
-        try manager.setAttributes(
-            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
-            ofItemAtPath: databaseDirectory.path
-        )
-        return status()
+        return config
+    }
+
+    static func reset() throws {
+        try FileManager.default.removeItem(at: root)
     }
 }
