@@ -41,6 +41,7 @@ final class TelegramService: ObservableObject {
     @Published var searchResults: [TelegramChat] = []
     @Published var archived = false
     @Published var loadingChats = false
+    @Published var moreChatsAvailable = true
     @Published var passwordHint = ""
     @Published var contacts: [TelegramContact] = []
 
@@ -53,6 +54,7 @@ final class TelegramService: ObservableObject {
     private var threads: [Int64: MessageThread] = [:]
     private var requestedUsers = Set<Int64>()
     private var receiverStarted = false
+    private var chatListLimit = 100
 
     private init() {}
 
@@ -232,12 +234,14 @@ final class TelegramService: ObservableObject {
     func logOut() { command("logOut") }
 
     func loadChats() {
+        if loadingChats { return }
         loadingChats = true
         let list: JSONObject = ["@type": archived ? "chatListArchive" : "chatListMain"]
         request("loadChats", ["chat_list": list, "limit": 100]) { [weak self] _ in
             self?.loadingChats = false
-            self?.request("getChats", ["chat_list": list, "limit": 100]) { [weak self] result in
+            self?.request("getChats", ["chat_list": list, "limit": self?.chatListLimit ?? 100]) { [weak self] result in
                 let ids = (result["chat_ids"] as? [NSNumber] ?? []).map(\.int64Value)
+                self?.moreChatsAvailable = ids.count >= (self?.chatListLimit ?? 100)
                 for id in ids {
                     self?.request("getChat", ["chat_id": id]) { [weak self] raw in
                         if raw.text("@type") == "chat" { self?.addChat(raw) }
@@ -247,7 +251,15 @@ final class TelegramService: ObservableObject {
         }
     }
 
+    func loadMoreChats() {
+        guard !loadingChats && moreChatsAvailable else { return }
+        chatListLimit += 100
+        loadChats()
+    }
+
     func toggleArchive() {
+        chatListLimit = 100
+        moreChatsAvailable = true
         archived.toggle()
         publishChats()
         loadChats()
