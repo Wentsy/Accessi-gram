@@ -321,8 +321,8 @@ final class TelegramService: ObservableObject {
     func prepareShareSession() {
         guard authStage == .ready else { return }
         shareSessionStatus = "正在準備跨 App 分享登入"
-        let apiID = apiID
-        let apiHash = apiHash
+        let id = self.apiID
+        let hash = self.apiHash
         let key = KeychainAPI.databaseKey()
         let directory = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -332,7 +332,7 @@ final class TelegramService: ObservableObject {
             let result: String
             do {
                 result = try ShareSessionBootstrap.prepareBeforeMainTDLibStarts(
-                    apiID: apiID, apiHash: apiHash,
+                    apiID: id, apiHash: hash,
                     encryptionKey: key, mainDatabaseDirectory: directory
                 )
             } catch {
