@@ -135,7 +135,10 @@ private func installButton(_ name: String, action: @escaping (NSObject) -> Bool,
         replace(cls, "accessibilityActivate", activate, "B@:")
         let oldElement = originalBool(cls, "isAccessibilityElement")
         let element: @convention(block) (NSObject) -> Bool = { object in
-            UIAccessibility.isVoiceOverRunning || (oldElement?(object) ?? false)
+            let native = oldElement?(object) ?? false
+            guard UIAccessibility.isVoiceOverRunning else { return native }
+            guard let label else { return true }
+            return native || !(label(object) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         replace(cls, "isAccessibilityElement", element, "B@:")
         if let label {
@@ -143,7 +146,10 @@ private func installButton(_ name: String, action: @escaping (NSObject) -> Bool,
             let method = class_getInstanceMethod(cls, sel)!
             let old = unsafeBitCast(method_getImplementation(method), to: (@convention(c) (NSObject, Selector) -> NSString?).self)
             let getter: @convention(block) (NSObject) -> NSString? = { object in
-                if UIAccessibility.isVoiceOverRunning, let value = label(object) { return value as NSString }
+                if UIAccessibility.isVoiceOverRunning, let value = label(object),
+                   !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return value as NSString
+                }
                 return old(object, sel)
             }
             replace(cls, "accessibilityLabel", getter, "@@:")
@@ -1559,7 +1565,7 @@ private func installSupplementalControls() {
     installButton("_TtC14MoreButtonNode14MoreButtonNode",
                   action: { send($0, "buttonPressed") },
                   label: { object in
-                      switch enumCase(field(objectField(object, "iconNode") as Any, "iconState")) {
+                      switch enumCase(objectField(object, "iconNode").flatMap { field($0, "iconState") }) {
                       case "search": return "搜尋"
                       case "more": return "更多選項"
                       default: return "更多選項"
