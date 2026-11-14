@@ -177,6 +177,7 @@ final class ShareRecipientPicker: UITableViewController, UISearchResultsUpdating
     private var all: [ShareRecipient] = []
     private let search = UISearchController(searchResultsController: nil)
     private var filtered: [ShareRecipient] = []
+    private var loadingRecipients = false
     private let status = UILabel()
 
     init(sender: ExtensionTelegramSender, onSelect: @escaping (ShareRecipient) -> Void) {
@@ -237,6 +238,8 @@ final class ShareRecipientPicker: UITableViewController, UISearchResultsUpdating
     }
 
     private func loadChats() {
+        guard !loadingRecipients else { return }
+        loadingRecipients = true
         status.text = "正在從 Telegram 取得最近聊天"
         status.accessibilityLabel = status.text
         refresh()
@@ -244,6 +247,7 @@ final class ShareRecipientPicker: UITableViewController, UISearchResultsUpdating
             do {
                 let latest = try await sender.recentRecipients()
                 if !latest.isEmpty { all = latest }
+                loadingRecipients = false
                 status.text = all.isEmpty ? "目前沒有可選擇的最近聊天" : ""
                 status.accessibilityLabel = status.text
                 refresh()
@@ -251,6 +255,7 @@ final class ShareRecipientPicker: UITableViewController, UISearchResultsUpdating
                     UIAccessibility.post(notification: .layoutChanged, argument: first)
                 }
             } catch {
+                loadingRecipients = false
                 status.text = all.isEmpty
                     ? "無法讀取 Telegram 最近聊天：\(error.localizedDescription)"
                     : "無法更新最近聊天，顯示先前取得的對話"
