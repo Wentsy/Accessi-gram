@@ -68,9 +68,11 @@ enum ShareSessionBootstrap {
 
         // The main TDLib client must not be opened yet. Copy the whole database
         // directory including SQLite WAL sidecars for one consistent snapshot.
-        let staging = root.appendingPathComponent("share-tdlib-" + UUID().uuidString)
-        try manager.copyItem(at: mainDatabaseDirectory, to: staging)
-        try manager.moveItem(at: staging, to: databaseDirectory)
+        if !manager.fileExists(atPath: databaseDirectory.path) {
+            let staging = root.appendingPathComponent("share-tdlib-" + UUID().uuidString)
+            try manager.copyItem(at: mainDatabaseDirectory, to: staging)
+            try manager.moveItem(at: staging, to: databaseDirectory)
+        }
         try manager.createDirectory(at: filesDirectory, withIntermediateDirectories: true)
 
         let config = ShareSessionConfiguration(
