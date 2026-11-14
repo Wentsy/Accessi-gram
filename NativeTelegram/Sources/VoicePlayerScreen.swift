@@ -113,8 +113,7 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
                     try OggOpusTranscoder.playableURL(for: url)
                 }.value
                 let audioSession = AVAudioSession.sharedInstance()
-                try audioSession.setCategory(.playback, mode: .default,
-                                             options: [.defaultToSpeaker])
+                try audioSession.setCategory(.playback, mode: .default)
                 try audioSession.setActive(true)
                 let audio = try AVAudioPlayer(contentsOf: playable)
                 audio.delegate = self
