@@ -28,6 +28,17 @@ extension Dictionary where Key == String, Value == Any {
     func flag(_ key: String) -> Bool { self[key] as? Bool ?? false }
 }
 
+struct BotSlashCommand: Identifiable {
+    let command: String
+    let description: String
+    var id: String { command }
+
+    var spoken: String {
+        let label = "/" + command
+        return description.isEmpty ? label : "\(label)，\(description)"
+    }
+}
+
 struct BotButton: Identifiable {
     let id: String
     let title: String
@@ -169,10 +180,16 @@ struct TelegramMessage: Identifiable, Equatable {
             fileID = Int(content.object("animation").object("animation").number("id"))
             fileKind = "video"
         case "messageDocument":
-            prefix = "檔案 \(content.object("document").text("file_name"))"
+            let filename = content.object("document").text("file_name")
+            let ext = (filename as NSString).pathExtension.lowercased()
+            let audioExtensions: Set<String> = [
+                "mp3", "m4a", "aac", "wav", "aiff", "aif", "caf", "ogg", "opus", "flac"
+            ]
+            let isAudio = audioExtensions.contains(ext)
+            prefix = isAudio ? "音訊 \(filename)" : "檔案 \(filename)"
             caption = content.object("caption").text("text")
             fileID = Int(content.object("document").object("document").number("id"))
-            fileKind = "document"
+            fileKind = isAudio ? "audio" : "document"
         case "messageSticker":
             prefix = "貼圖 \(content.object("sticker").text("emoji"))"
         case "messageVideoNote":
