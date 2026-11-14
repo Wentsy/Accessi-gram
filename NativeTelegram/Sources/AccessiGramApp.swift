@@ -202,13 +202,13 @@ struct ConversationsScreen: View {
             .onChange(of: searchText) { query in service.search(query) }
             .navigationTitle(service.archived ? "封存的對話" : "聊天")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button(service.archived ? "返回聊天" : "封存") { service.toggleArchive() }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink { NewChatScreen() } label: { Label("新增聊天", systemImage: "square.and.pencil") }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button { showSettings = true } label: { Label("設定", systemImage: "gearshape") }
                 }
             }
@@ -244,7 +244,7 @@ struct SettingsScreen: View {
                 }
             }
             .navigationTitle("設定")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("完成") { dismiss() } } }
         }
     }
 }
