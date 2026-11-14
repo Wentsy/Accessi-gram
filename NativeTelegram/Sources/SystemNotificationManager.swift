@@ -33,6 +33,22 @@ final class SystemNotificationManager: NSObject, UIApplicationDelegate, UNUserNo
     }
 
     func requestPermission() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            Task { @MainActor in
+                if settings.authorizationStatus == .denied ||
+                   settings.authorizationStatus == .authorized ||
+                   settings.authorizationStatus == .provisional {
+                    UIApplication.shared.open(
+                        URL(string: UIApplication.openSettingsURLString)!
+                    )
+                } else {
+                    self.askFirstPermission()
+                }
+            }
+        }
+    }
+
+    private func askFirstPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) {
             granted, error in
             Task { @MainActor in
