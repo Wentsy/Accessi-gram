@@ -12,7 +12,19 @@ extension Dictionary where Key == String, Value == Any {
     func object(_ key: String) -> JSONObject { self[key] as? JSONObject ?? [:] }
     func objects(_ key: String) -> [JSONObject] { self[key] as? [JSONObject] ?? [] }
     func text(_ key: String) -> String { self[key] as? String ?? "" }
-    func number(_ key: String) -> Int64 { (self[key] as? NSNumber)?.int64Value ?? 0 }
+    // The TDLib JSON API sends int64 values as decimal strings.
+    func number(_ key: String) -> Int64 {
+        if let value = self[key] as? NSNumber { return value.int64Value }
+        if let value = self[key] as? String { return Int64(value) ?? 0 }
+        return 0
+    }
+    func intIDs(_ key: String) -> [Int64] {
+        (self[key] as? [Any] ?? []).compactMap {
+            if let value = $0 as? NSNumber { return value.int64Value }
+            if let value = $0 as? String { return Int64(value) }
+            return nil
+        }
+    }
     func flag(_ key: String) -> Bool { self[key] as? Bool ?? false }
 }
 
@@ -46,8 +58,12 @@ struct TelegramChat: Identifiable, Equatable {
         title = raw.text("title")
         unreadCount = Int(raw.number("unread_count"))
         let positions = raw.objects("positions")
-        let main = positions.first { $0.object("list").text("@type") == "chatListMain" }
-        let archive = positions.first { $0.object("list").text("@type") == "chatListArchive" }
+        let main = positions.first {
+            $0.object("list").text("@type") == "chatListMain" && $0.number("order") > 0
+        }
+        let archive = positions.first {
+            $0.object("list").text("@type") == "chatListArchive" && $0.number("order") > 0
+        }
         order = (main ?? archive ?? [:]).number("order")
         isPinned = (main ?? archive ?? [:]).flag("is_pinned")
         isArchived = main == nil && archive != nil
