@@ -381,9 +381,7 @@ final class ExtensionTelegramSender {
             // A retry after a partial upload must not duplicate successful
             // attachments from the same share sheet session.
             if deliveredShareItems[share.id]?.contains(index) == true { continue }
-            guard let file = ShareMailbox.url(for: item) else {
-                throw ShareSendError.failed("附件路徑已失效")
-            }
+            let file = ShareMailbox.url(for: item)
             progress("正在傳送第 \(index + 1) 個附件，共 \(share.attachments.count) 個")
             let caption = index == 0 ? share.caption : ""
             let content = messageContent(item, at: file, caption: caption)
