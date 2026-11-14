@@ -86,7 +86,6 @@ final class TelegramService: ObservableObject {
     @Published var archived = false
     @Published var loadingChats = false
     @Published var chatSyncStatus = "等待同步聊天"
-    @Published var shareSessionStatus = ShareSessionBootstrap.status()
     @Published var hasLoadedChatList = false
     @Published var moreChatsAvailable = true
     @Published var passwordHint = ""
@@ -130,26 +129,6 @@ final class TelegramService: ObservableObject {
     private func connect(apiID: Int, apiHash: String) {
         self.apiID = apiID
         self.apiHash = apiHash
-
-        // Do this BEFORE TDLib opens the main SQLite database. An isolated
-        // authenticated snapshot lets iOS Share Extension transmit directly
-        // without reopening the containing app or racing the live database.
-        let support = FileManager.default.urls(for: .applicationSupportDirectory,
-                                                in: .userDomainMask)[0]
-        do {
-            try ShareSessionBootstrap.prepareBeforeMainTDLibStarts(
-                apiID: apiID,
-                apiHash: apiHash,
-                encryptionKey: KeychainAPI.databaseKey(),
-                mainDatabaseDirectory: support.appendingPathComponent("tdlib")
-            )
-        } catch {
-            // Missing App Group entitlements or a first-login database is now
-            // visible under Settings, instead of disappearing into the console.
-            shareSessionStatus = "分享準備失敗：\(error.localizedDescription)"
-        }
-        shareSessionStatus = ShareSessionBootstrap.status() == "分享登入資料尚未建立"
-            ? shareSessionStatus : ShareSessionBootstrap.status()
 
         clientID = td_create_client_id()
         if !receiverStarted {
@@ -307,40 +286,11 @@ final class TelegramService: ObservableObject {
                 alreadyVibrated.removeAll()
                 recentVibrationIDs.removeAll()
                 chatSyncStatus = "正在同步 Telegram 對話與群組"
-                // First successful login can create its database after
-                // connect(), so provision the share session a second time.
-                prepareShareSession()
                 loadContacts()
                 loadChats()
             }
         case "authorizationStateLoggingOut", "authorizationStateClosed": authStage = .phone
         default: authStage = .unknown
-        }
-    }
-
-    func prepareShareSession() {
-        guard authStage == .ready else { return }
-        shareSessionStatus = "正在準備跨 App 分享登入"
-        let id = self.apiID
-        let hash = self.apiHash
-        let key = KeychainAPI.databaseKey()
-        let directory = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0].appendingPathComponent("tdlib")
-
-        Task.detached(priority: .utility) {
-            let result: String
-            do {
-                result = try ShareSessionBootstrap.prepareBeforeMainTDLibStarts(
-                    apiID: id, apiHash: hash,
-                    encryptionKey: key, mainDatabaseDirectory: directory
-                )
-            } catch {
-                result = "分享登入準備失敗：\(error.localizedDescription)"
-            }
-            await MainActor.run { [weak self] in
-                self?.shareSessionStatus = result
-            }
         }
     }
 
@@ -359,10 +309,7 @@ final class TelegramService: ObservableObject {
         command("checkAuthenticationEmailCode", ["code": ["@type": "emailAddressAuthenticationCode", "code": code]])
     }
     func startQR() { command("requestQrCodeAuthentication", ["other_user_ids": []]) }
-    func logOut() {
-        ShareSessionBootstrap.clearAuthorization()
-        command("logOut")
-    }
+    func logOut() { command("logOut") }
 
     func loadChats() {
         guard authStage == .ready, !loadingChats else { return }
@@ -435,7 +382,6 @@ final class TelegramService: ObservableObject {
         if !chats.isEmpty {
             chatSyncStatus = "已同步 \(chats.count) 個對話"
         }
-        publishShareRecipients()
     }
 
 
@@ -455,27 +401,6 @@ final class TelegramService: ObservableObject {
                 }
             }
         }
-    }
-
-    private func publishShareRecipients() {
-        var entries = chatsByID.values
-            .filter { $0.order > 0 && !$0.isArchived }
-            .sorted { $0.order > $1.order }
-            .map {
-                ShareRecipient(id: "chat:\($0.id)", title: $0.title,
-                               chatID: "\($0.id)", userID: nil)
-            }
-
-        // Contacts without an existing conversation can also be selected.
-        for contact in contacts where !entries.contains(where: {
-            $0.title == contact.name
-        }) {
-            entries.append(ShareRecipient(
-                id: "contact:\(contact.id)", title: contact.name,
-                chatID: nil, userID: "\(contact.id)"
-            ))
-        }
-        ShareMailbox.saveRecipients(entries)
     }
 
     func createPrivateChat(userID: Int64, completion: @escaping (Int64?) -> Void) {
