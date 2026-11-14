@@ -19,12 +19,14 @@ final class AccessibleHelpController: UITableViewController {
                   explanation: "群組和頻道也使用相同的訊息閱讀方式。長篇貼文的文字與附件描述合在同一則訊息中，避免左右滑動時被拆成多個焦點。")
         ]),
         ("傳送訊息與附件", [
-            Topic(title: "輸入文字",
-                  explanation: "打開聊天後，找到訊息編輯框，點兩下輸入文字。輸入完成後，移到傳送文字訊息按鈕，點兩下送出。"),
+            Topic(title: "輸入文字與收起鍵盤",
+                  explanation: "打開聊天後，找到訊息編輯框，點兩下輸入文字。按傳送後鍵盤會保持展開，方便連續傳送；用旁白左右滑回聊天訊息時，鍵盤會自動收起而不改變正在朗讀的訊息焦點。"),
             Topic(title: "錄製語音訊息",
                   explanation: "訊息編輯框沒有文字時，右邊是開始錄製語音訊息按鈕。開始後，同一位置變成停止錄音並傳送，旁邊還有取消錄音。停止並傳送會將剛錄好的語音交給 Telegram 傳送。"),
             Topic(title: "照片、影片與檔案",
-                  explanation: "訊息編輯框左邊依序是傳送照片或影片，以及傳送檔案或附件。收到的媒體可從訊息的上下滑操作選擇開啟。")
+                  explanation: "訊息編輯框左邊依序是傳送照片或影片，以及傳送檔案或附件。收到的一般檔案會使用 iOS 的 Quick Look 或分享功能開啟。"),
+            Topic(title: "播放語音訊息",
+                  explanation: "對語音訊息點兩下就能開啟播放器並自動開始播放，支援 Telegram 的 OGG Opus 語音。可使用播放暫停、播放進度和速度按鈕，返回聊天室即停止播放。")
         ]),
         ("訊息操作", [
             Topic(title: "訊息上下滑動",
@@ -33,6 +35,14 @@ final class AccessibleHelpController: UITableViewController {
                   explanation: "選擇翻譯成繁體中文後，會直接朗讀翻譯結果，不必切換頁面。翻譯功能使用 Google 免費網頁端點；只有你主動選擇翻譯的文字才會送往 Google，秘密聊天的文字也不例外。"),
             Topic(title: "機器人按鈕",
                   explanation: "遇到有互動按鈕的機器人訊息，可用上下滑選擇展開機器人選單，再從清楚標示的按鈕中選擇操作。")
+        ]),
+        ("通知與分享", [
+            Topic(title: "背景通知",
+                  explanation: "在設定中選擇 iOS 系統通知，授權 Accessi Gram 顯示橫幅、鎖定畫面通知、通知中心及播放系統預設音效。這需要已設定 Apple Push Notifications 並成功由 Telegram 註冊裝置；如果憑證未配置，即使授權也可能沒有背景通知。"),
+            Topic(title: "前景震動",
+                  explanation: "App 開啟期間收到新訊息會震動，設定可選擇開啟或關閉；載入舊訊息與自己送出的訊息不會觸發。"),
+            Topic(title: "從其他 App 分享",
+                  explanation: "在其他 App 的分享介面選擇 Accessi Gram，先選擇聯絡人或群組，再輸入說明文字。Share Extension 會先將檔案安全暫存；請再次開啟 Accessi Gram，才會自動送出。iOS 不允許一般分享延伸功能任意強制啟動主 App。")
         ]),
         ("其他", [
             Topic(title: "登入與同步",
