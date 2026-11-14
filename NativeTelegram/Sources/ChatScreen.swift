@@ -17,6 +17,7 @@ struct ChatScreen: View {
     @State private var mediaMessage: TelegramMessage?
     @State private var forwardMessage: TelegramMessage?
     @State private var showingForward = false
+    @State private var showingReactions = false
     @State private var showingEdit = false
     @State private var editedText = ""
 
@@ -85,6 +86,7 @@ struct ChatScreen: View {
                         showingBotMenu = true
                     }
                 }
+                Button("表情回應") { showingReactions = true }
                 Button("轉寄") {
                     forwardMessage = message
                     showingForward = true
@@ -114,6 +116,13 @@ struct ChatScreen: View {
                     Button(button.title) {
                         service.botAction(button, message: message)
                     }
+                }
+            }
+        }
+        .confirmationDialog("選擇表情回應", isPresented: $showingReactions, titleVisibility: .visible) {
+            if let message = menuMessage {
+                ForEach(["👍", "❤️", "😂", "🎉", "😮", "🙏"], id: \.self) { emoji in
+                    Button(emoji) { service.react(message, emoji: emoji) }
                 }
             }
         }
