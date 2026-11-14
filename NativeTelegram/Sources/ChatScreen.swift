@@ -265,7 +265,7 @@ struct ForwardPicker: View {
             }
             .searchable(text: $query, prompt: "搜尋要轉寄的聊天")
             .navigationTitle("轉寄給")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("取消") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("取消") { dismiss() } } }
         }
     }
 }
