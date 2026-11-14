@@ -162,7 +162,7 @@ struct ChatScreen: View {
             AccessibleSystemMenu.present(
                 title: "機器人斜線命令",
                 choices: commands.map {
-                    AccessibleMenuChoice($0.command, "/" + $0.command, $0.description)
+                    AccessibleMenuChoice($0.command, $0.spoken)
                 }
             ) { selected in
                 ComposerBarView.active?.insertBotCommand("/" + selected)
