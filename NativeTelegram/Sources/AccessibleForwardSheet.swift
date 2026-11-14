@@ -73,6 +73,16 @@ final class AccessibleForwardController: UITableViewController, UISearchResultsU
         refresh()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if let first = tableView.cellForRow(at: IndexPath(row: 0, section: 0)) {
+            UIAccessibility.post(notification: .screenChanged, argument: first)
+        } else {
+            UIAccessibility.post(notification: .screenChanged,
+                                 argument: search.searchBar.searchTextField)
+        }
+    }
+
     @objc private func cancel() { onFinish() }
 
     func updateSearchResults(for searchController: UISearchController) {
