@@ -208,18 +208,52 @@ final class ShareRecipientPicker: UITableViewController, UISearchResultsUpdating
 
         all = ShareMailbox.recipients()
         refresh()
-        // Always query Telegram, even if the main app never populated an App
-        // Group snapshot or iOS only recently installed the share extension.
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        Task { @MainActor in
+            do {
+                try await sender.start()
+                if sender.stage == .ready {
+                    loadChats()
+                } else {
+                    openSignIn()
+                }
+            } catch {
+                status.text = "無法連線 Telegram：\(error.localizedDescription)"
+                status.accessibilityLabel = status.text
+                refresh()
+            }
+        }
+    }
+
+    private func openSignIn() {
+        guard navigationController?.topViewController === self else { return }
+        let login = ShareLoginController(sender: sender) { [weak self] in
+            self?.loadChats()
+        }
+        navigationController?.pushViewController(login, animated: true)
+    }
+
+    private func loadChats() {
+        status.text = "正在從 Telegram 取得最近聊天"
+        status.accessibilityLabel = status.text
+        refresh()
         Task { @MainActor in
             do {
                 let latest = try await sender.recentRecipients()
                 if !latest.isEmpty { all = latest }
                 status.text = all.isEmpty ? "目前沒有可選擇的最近聊天" : ""
+                status.accessibilityLabel = status.text
                 refresh()
+                if let first = tableView.cellForRow(at: IndexPath(row: 0, section: 0)) {
+                    UIAccessibility.post(notification: .layoutChanged, argument: first)
+                }
             } catch {
                 status.text = all.isEmpty
                     ? "無法讀取 Telegram 最近聊天：\(error.localizedDescription)"
-                    : "最近聊天暫時無法更新，顯示上次取得的對話"
+                    : "無法更新最近聊天，顯示先前取得的對話"
                 status.accessibilityLabel = status.text
                 refresh()
             }
@@ -255,15 +289,6 @@ final class ShareRecipientPicker: UITableViewController, UISearchResultsUpdating
         cell.accessibilityHint = "點兩下選擇此聊天室"
         cell.accessibilityTraits = [.button]
         return cell
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        if let first = tableView.cellForRow(at: IndexPath(row: 0, section: 0)) {
-            UIAccessibility.post(notification: .screenChanged, argument: first)
-        } else {
-            UIAccessibility.post(notification: .screenChanged, argument: status)
-        }
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt path: IndexPath) {
