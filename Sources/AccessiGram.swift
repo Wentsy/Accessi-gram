@@ -513,6 +513,13 @@ private func modalElements(_ root: UIView, node: NSObject) -> NSArray? {
             result.append(element)
         }
         nodes = list(field(content, "actionNodes")).compactMap { $0 as? NSObject }
+        if nodes.isEmpty {
+            nodes = descendants(root).compactMap { view in
+                guard let candidate = attachedNode(view),
+                      className(candidate) == "_TtC7Display26TextAlertContentActionNode" else { return nil }
+                return candidate
+            }
+        }
     } else {
         nodes = descendants(root).compactMap { view in
             guard let candidate = attachedNode(view) else { return nil }
@@ -522,6 +529,8 @@ private func modalElements(_ root: UIView, node: NSObject) -> NSArray? {
                    kind == "_TtC7Display21ActionSheetSwitchNode" ? candidate : nil
         }
     }
+    // Never hide a custom dialog's native controls when they cannot be identified.
+    guard !nodes.isEmpty else { return nil }
     var active = Set<ObjectIdentifier>()
     for action in nodes {
         guard let button = nodeView(action), visible(button, in: root), !button.bounds.isEmpty else { continue }
@@ -559,6 +568,7 @@ private func modalElements(_ root: UIView, node: NSObject) -> NSArray? {
         result.append(element)
     }
     cache.actions = cache.actions.filter { active.contains($0.key) }
+    guard !active.isEmpty else { return nil }
     // Preserve real text fields in confirmation dialogs rather than replacing them.
     let editors = descendants(root).filter { $0 is UITextField || $0 is UITextView }
         .filter { visible($0, in: root) && !$0.bounds.isEmpty }
@@ -921,12 +931,14 @@ private func prepareReadingEdge(_ element: UIView, history: HistoryViewport) {
     guard rows.count >= 2,
           let index = rows.firstIndex(where: { $0.element === element }) else { return }
     let tracking = state(history.chat)
+    let mounted = history.messages(mounted: true)
     let previous = tracking.lastMessageFocus.flatMap { old in
-        rows.firstIndex { $0.element === old }
+        mounted.firstIndex { $0.element === old }
     }
+    let current = mounted.firstIndex { $0.element === element }
     let direction: HistoryDirection
-    if let previous, previous != index {
-        direction = index < previous ? .older : .newer
+    if let previous, let current, previous != current {
+        direction = current < previous ? .older : .newer
         tracking.readingDirection = direction
     } else if let last = tracking.readingDirection {
         direction = last
@@ -1045,8 +1057,10 @@ private func prepareGlobalPagination(from focus: UIView, fromLayout: Bool = fals
         let state = paginationState(backing)
         if !fromLayout && state.lastFocus !== focus {
             if let previous = state.lastRow,
-               let oldIndex = visibleRows.firstIndex(where: { $0.0 === previous }), oldIndex != index {
-                state.direction = index > oldIndex ? .towardBottom : .towardTop
+               let oldIndex = mounted.firstIndex(where: { $0.0 === previous }),
+               let newIndex = mounted.firstIndex(where: { $0.0 === visibleRows[index].0 }),
+               oldIndex != newIndex {
+                state.direction = newIndex > oldIndex ? .towardBottom : .towardTop
             } else if state.direction == nil {
                 state.direction = index >= visibleRows.count - 2 ? .towardBottom :
                     (index <= 1 ? .towardTop : nil)
