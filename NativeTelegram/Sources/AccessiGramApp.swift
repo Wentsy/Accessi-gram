@@ -18,7 +18,6 @@ struct AccessiGramNativeApp: App {
                 .onChange(of: scenePhase) { phase in
                     if phase == .active {
                         SystemNotificationManager.shared.refreshAuthorizationStatus()
-                        service.processSharedUploads()
                     }
                 }
         }
