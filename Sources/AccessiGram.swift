@@ -485,12 +485,14 @@ private func modalElements(_ root: UIView, node: NSObject) -> NSArray? {
     objc_setAssociatedObject(root, &modalCacheKey, cache, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     var result: [Any] = []
     var nodes: [NSObject] = []
+    var displayedText = Set<String>()
     if kind == "_TtC7Display19AlertControllerNode",
        let content = objectField(node, "contentNode") {
         for name in ["titleNode", "textAccessibilityNode", "textNode"] {
             guard let source = objectField(content, name), let area = nodeView(source),
                   visible(area, in: root), !area.bounds.isEmpty,
-                  let label = text(source) ?? area.accessibilityLabel, !label.isEmpty else { continue }
+                  let label = text(source) ?? area.accessibilityLabel, !label.isEmpty,
+                  displayedText.insert(label).inserted else { continue }
             let element = cache.textElements[name] ?? UIAccessibilityElement(accessibilityContainer: root)
             cache.textElements[name] = element
             element.accessibilityLabel = label
@@ -786,8 +788,10 @@ private struct HistoryViewport {
                   isHistoryMessage(item),
                   let row = nodeView(item), visible(row, in: view) else { return nil }
             let area = messageElement(item, row: row)
-            let label = (area.accessibilityLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let value = (area.accessibilityValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = (area.accessibilityLabel ?? area.accessibilityAttributedLabel?.string ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = (area.accessibilityValue ?? area.accessibilityAttributedValue?.string ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             // Empty recycled nodes are not messages and must not become VoiceOver buttons.
             guard !label.isEmpty || !value.isEmpty else { return nil }
             let rect = window.convert(area.bounds, from: area)
