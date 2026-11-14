@@ -31,6 +31,13 @@ enum ShareSessionBootstrap {
         groupRoot.appendingPathComponent("share-session.json")
     }
 
+    static func clearAuthorization() {
+        let manager = FileManager.default
+        try? manager.removeItem(at: configURL)
+        try? manager.removeItem(at: databaseDirectory)
+        try? manager.removeItem(at: filesDirectory)
+    }
+
     static func configuration() throws -> ShareSessionConfiguration {
         let data = try Data(contentsOf: configURL)
         return try JSONDecoder().decode(ShareSessionConfiguration.self, from: data)
