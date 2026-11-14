@@ -88,6 +88,18 @@ final class ShareViewController: SLComposeServiceViewController {
                     }
                     group.leave()
                 }
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
+                group.enter()
+                provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) {
+                    item, error in
+                    lock.lock()
+                    if let content = item as? String { texts.append(content) }
+                    else if let data = item as? Data, let content = String(data: data, encoding: .utf8) {
+                        texts.append(content)
+                    } else if let error { errors.append(error.localizedDescription) }
+                    lock.unlock()
+                    group.leave()
+                }
             } else if let selectedType = provider.registeredTypeIdentifiers.first(where: {
                 $0 != UTType.plainText.identifier && $0 != UTType.url.identifier
             }) {
