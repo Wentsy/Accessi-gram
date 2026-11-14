@@ -134,6 +134,17 @@ final class AccessibleConversationsController: UIViewController, UITableViewDele
                 self?.refreshRows()
             }
             .store(in: &subscriptions)
+        service.$notificationChatID.receive(on: DispatchQueue.main)
+            .sink { [weak self] chatID in
+                guard let self, let chatID else { return }
+                self.service.notificationChatID = nil
+                let screen = UIHostingController(rootView: ChatScreen(chatID: chatID))
+                screen.title = self.service.chatTitle(chatID)
+                self.navigationController?.pushViewController(screen, animated: true)
+                UIAccessibility.post(notification: .screenChanged,
+                                     argument: "已開啟通知的聊天室")
+            }
+            .store(in: &subscriptions)
         updateStatus()
         refreshRows()
         if service.chats.isEmpty { service.loadChats() }
