@@ -1,0 +1,488 @@
+import Foundation
+import Combine
+import Security
+import UIKit
+import TDLibFramework
+
+typealias TDCallback = (JSONObject) -> Void
+
+enum AuthStage: String {
+    case credentials, phone, code, password, email, emailCode, qr, ready, unknown
+}
+
+enum KeychainAPI {
+    static let account = "org.accessigram.native.telegram"
+    static func save(id: Int, hash: String) {
+        let data = try! JSONSerialization.data(withJSONObject: ["id": id, "hash": hash])
+        SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrAccount: account] as CFDictionary)
+        SecItemAdd([kSecClass: kSecClassGenericPassword, kSecAttrAccount: account,
+                    kSecValueData: data,
+                    kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly] as CFDictionary, nil)
+    }
+    static func load() -> (Int, String)? {
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching([kSecClass: kSecClassGenericPassword,
+                                          kSecAttrAccount: account, kSecReturnData: true,
+                                          kSecMatchLimit: kSecMatchLimitOne] as CFDictionary, &result)
+        guard status == errSecSuccess else { return nil }
+        let json = try! JSONSerialization.jsonObject(with: result as! Data) as! JSONObject
+        return (Int(json.number("id")), json.text("hash"))
+    }
+}
+
+@MainActor
+final class TelegramService: ObservableObject {
+    static let shared = TelegramService()
+
+    @Published var authStage: AuthStage = .credentials
+    @Published var qrLink = ""
+    @Published var errorMessage = ""
+    @Published var chats: [TelegramChat] = []
+    @Published var searchResults: [TelegramChat] = []
+    @Published var archived = false
+    @Published var loadingChats = false
+    @Published var passwordHint = ""
+
+    private var clientID: Int32 = 0
+    private var apiID = 0
+    private var apiHash = ""
+    private var callbacks: [String: TDCallback] = [:]
+    private var chatsByID: [Int64: TelegramChat] = [:]
+    private var users: [Int64: String] = [:]
+    private var threads: [Int64: MessageThread] = [:]
+    private var requestedUsers = Set<Int64>()
+    private var receiverStarted = false
+
+    private init() {}
+
+    func start() {
+        guard clientID == 0 else { return }
+        if let (id, hash) = KeychainAPI.load() { connect(apiID: id, apiHash: hash) }
+    }
+
+    func configure(id: Int, hash: String) {
+        KeychainAPI.save(id: id, hash: hash)
+        connect(apiID: id, apiHash: hash)
+    }
+
+    private func connect(apiID: Int, apiHash: String) {
+        self.apiID = apiID
+        self.apiHash = apiHash
+        clientID = td_create_client_id()
+        if !receiverStarted {
+            receiverStarted = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                while true {
+                    if let output = td_receive(0.5) {
+                        let message = String(cString: output)
+                        let json = try! JSONSerialization.jsonObject(with: Data(message.utf8)) as! JSONObject
+                        Task { @MainActor in self.handle(json) }
+                    }
+                }
+            }
+        }
+        command("getAuthorizationState")
+    }
+
+    func request(_ method: String, _ arguments: JSONObject = [:], completion: TDCallback? = nil) {
+        var payload = arguments
+        payload["@type"] = method
+        if let completion {
+            let extra = UUID().uuidString
+            payload["@extra"] = extra
+            callbacks[extra] = completion
+        }
+        let data = try! JSONSerialization.data(withJSONObject: payload)
+        td_send(clientID, String(decoding: data, as: UTF8.self))
+    }
+
+    func command(_ method: String, _ arguments: JSONObject = [:]) {
+        request(method, arguments) { [weak self] response in
+            if response.text("@type") == "error" {
+                self?.errorMessage = response.text("message")
+            }
+        }
+    }
+
+    private func handle(_ json: JSONObject) {
+        if let extra = json["@extra"] as? String {
+            callbacks.removeValue(forKey: extra)?(json)
+            return
+        }
+        switch json.text("@type") {
+        case "updateAuthorizationState":
+            handleAuth(json.object("authorization_state"))
+        case "updateNewChat":
+            addChat(json.object("chat"))
+        case "updateChatTitle":
+            let id = json.number("chat_id")
+            chatsByID[id]?.title = json.text("title")
+            publishChats()
+        case "updateChatPosition":
+            let id = json.number("chat_id")
+            let position = json.object("position")
+            if var chat = chatsByID[id] {
+                let kind = position.object("list").text("@type")
+                if kind == "chatListMain" {
+                    chat.order = position.number("order")
+                    chat.isArchived = false
+                } else if kind == "chatListArchive" && position.number("order") != 0 {
+                    chat.order = position.number("order")
+                    chat.isArchived = true
+                }
+                chat.isPinned = position.flag("is_pinned")
+                chatsByID[id] = chat
+                publishChats()
+            }
+        case "updateChatLastMessage":
+            let id = json.number("chat_id")
+            if var chat = chatsByID[id] {
+                let content = json.object("last_message").object("content")
+                chat.lastPreview = content.object("text").text("text")
+                if chat.lastPreview.isEmpty {
+                    chat.lastPreview = content.text("@type").replacingOccurrences(of: "message", with: "")
+                }
+                if let position = json.objects("positions").first(where: {
+                    $0.object("list").text("@type") == "chatListMain" || $0.object("list").text("@type") == "chatListArchive"
+                }) {
+                    chat.order = position.number("order")
+                    chat.isArchived = position.object("list").text("@type") == "chatListArchive"
+                }
+                chatsByID[id] = chat
+                publishChats()
+            }
+        case "updateChatReadInbox":
+            chatsByID[json.number("chat_id")]?.unreadCount = Int(json.number("unread_count"))
+            publishChats()
+        case "updateUser":
+            storeUser(json.object("user"))
+        case "updateNewMessage":
+            receive(json.object("message"))
+        case "updateMessageSendSucceeded":
+            let message = json.object("message")
+            threads[message.number("chat_id")]?.remove([json.number("old_message_id")])
+            receive(message)
+        case "updateMessageContent", "updateMessageEdited":
+            let chatID = json.number("chat_id")
+            let id = json.number("message_id")
+            request("getMessage", ["chat_id": chatID, "message_id": id]) { [weak self] object in
+                self?.receive(object)
+            }
+        case "updateDeleteMessages":
+            let ids = Set((json["message_ids"] as? [NSNumber] ?? []).map(\.int64Value))
+            threads[json.number("chat_id")]?.remove(ids)
+        default: break
+        }
+    }
+
+    private func handleAuth(_ state: JSONObject) {
+        switch state.text("@type") {
+        case "authorizationStateWaitTdlibParameters":
+            let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            command("setTdlibParameters", [
+                "api_id": apiID, "api_hash": apiHash,
+                "database_directory": root.appendingPathComponent("tdlib").path,
+                "files_directory": root.appendingPathComponent("files").path,
+                "database_encryption_key": "",
+                "use_message_database": true, "use_file_database": true,
+                "use_chat_info_database": true, "use_secret_chats": true,
+                "enable_storage_optimizer": true,
+                "system_language_code": "zh-TW",
+                "system_version": UIDevice.current.systemVersion,
+                "device_model": UIDevice.current.model,
+                "application_version": "1.0", "use_test_dc": false
+            ])
+        case "authorizationStateWaitPhoneNumber": authStage = .phone
+        case "authorizationStateWaitCode": authStage = .code
+        case "authorizationStateWaitPassword":
+            authStage = .password
+            passwordHint = state.text("password_hint")
+        case "authorizationStateWaitEmailAddress": authStage = .email
+        case "authorizationStateWaitEmailCode": authStage = .emailCode
+        case "authorizationStateWaitOtherDeviceConfirmation":
+            authStage = .qr
+            qrLink = state.text("link")
+        case "authorizationStateReady":
+            authStage = .ready
+            loadChats()
+        case "authorizationStateLoggingOut", "authorizationStateClosed": authStage = .phone
+        default: authStage = .unknown
+        }
+    }
+
+    func phone(_ phone: String) {
+        command("setAuthenticationPhoneNumber", ["phone_number": phone, "settings": [
+            "@type": "phoneNumberAuthenticationSettings", "allow_flash_call": false,
+            "allow_missed_call": false, "is_current_phone_number": false,
+            "allow_sms_retriever_api": false
+        ]])
+    }
+
+    func code(_ code: String) { command("checkAuthenticationCode", ["code": code]) }
+    func password(_ password: String) { command("checkAuthenticationPassword", ["password": password]) }
+    func email(_ email: String) { command("setAuthenticationEmailAddress", ["email_address": email]) }
+    func emailCode(_ code: String) {
+        command("checkAuthenticationEmailCode", ["code": ["@type": "emailAddressAuthenticationCode", "code": code]])
+    }
+    func startQR() { command("requestQrCodeAuthentication", ["other_user_ids": []]) }
+    func logOut() { command("logOut") }
+
+    func loadChats() {
+        loadingChats = true
+        let list: JSONObject = ["@type": archived ? "chatListArchive" : "chatListMain"]
+        request("loadChats", ["chat_list": list, "limit": 100]) { [weak self] _ in
+            self?.loadingChats = false
+            self?.request("getChats", ["chat_list": list, "limit": 100]) { [weak self] result in
+                let ids = (result["chat_ids"] as? [NSNumber] ?? []).map(\.int64Value)
+                for id in ids {
+                    self?.request("getChat", ["chat_id": id]) { [weak self] raw in
+                        if raw.text("@type") == "chat" { self?.addChat(raw) }
+                    }
+                }
+            }
+        }
+    }
+
+    func toggleArchive() {
+        archived.toggle()
+        publishChats()
+        loadChats()
+    }
+
+    private func addChat(_ raw: JSONObject) {
+        if raw.number("id") == 0 { return }
+        let chat = TelegramChat(raw)
+        chatsByID[chat.id] = chat
+        publishChats()
+    }
+
+    private func publishChats() {
+        chats = chatsByID.values
+            .filter { $0.isArchived == archived && $0.order > 0 }
+            .sorted { $0.order == $1.order ? $0.id > $1.id : $0.order > $1.order }
+    }
+
+    func chatTitle(_ id: Int64) -> String { chatsByID[id]?.title ?? "聊天室" }
+    func chatType(_ id: Int64) -> String { chatsByID[id]?.type ?? "" }
+
+    private func storeUser(_ raw: JSONObject) {
+        let id = raw.number("id")
+        if id == 0 { return }
+        let name = [raw.text("first_name"), raw.text("last_name")].filter { !$0.isEmpty }.joined(separator: " ")
+        users[id] = name.isEmpty ? "使用者 \(id)" : name
+        for thread in threads.values {
+            var copy = thread.messages
+            for index in copy.indices where copy[index].sender == "使用者 \(id)" {
+                copy[index].sender = users[id]!
+            }
+            if thread.messages != copy { thread.messages = copy }
+        }
+    }
+
+    private func loadSender(_ raw: JSONObject) {
+        let sender = raw.object("sender_id")
+        guard sender.text("@type") == "messageSenderUser" else { return }
+        let userID = sender.number("user_id")
+        if users[userID] != nil || requestedUsers.contains(userID) { return }
+        requestedUsers.insert(userID)
+        request("getUser", ["user_id": userID]) { [weak self] user in
+            if user.text("@type") == "user" { self?.storeUser(user) }
+        }
+    }
+
+    func thread(_ id: Int64) -> MessageThread {
+        if let existing = threads[id] { return existing }
+        let fresh = MessageThread(chatID: id)
+        threads[id] = fresh
+        return fresh
+    }
+
+    func open(_ id: Int64) {
+        let model = thread(id)
+        if !model.hasOpened {
+            model.hasOpened = true
+            command("openChat", ["chat_id": id])
+        }
+        if !model.isInitialized {
+            model.isInitialized = true
+            history(id, before: 0)
+        }
+    }
+
+    func close(_ id: Int64) {
+        let model = thread(id)
+        if model.hasOpened {
+            model.hasOpened = false
+            command("closeChat", ["chat_id": id])
+        }
+    }
+
+    func older(_ id: Int64) {
+        let model = thread(id)
+        guard !model.loading && model.hasMore else { return }
+        history(id, before: model.messages.first?.id ?? 0)
+    }
+
+    private func history(_ id: Int64, before: Int64) {
+        let model = thread(id)
+        if model.loading { return }
+        model.loading = true
+        request("getChatHistory", [
+            "chat_id": id, "from_message_id": before,
+            "offset": 0, "limit": 75, "only_local": false
+        ]) { [weak self] result in
+            guard let self else { return }
+            let raw = result.objects("messages")
+            raw.forEach { self.loadSender($0) }
+            let page = raw.map { TelegramMessage($0, users: self.users, chats: self.chatsByID) }
+            let priorOldest = model.messages.first?.id
+            model.merge(page)
+            model.loading = false
+            if raw.isEmpty || (before > 0 && priorOldest == model.messages.first?.id) {
+                model.hasMore = false
+            }
+            if before == 0, let last = model.messages.last {
+                self.command("viewMessages", ["chat_id": id,
+                                              "message_ids": [last.id], "force_read": true])
+            }
+        }
+    }
+
+    private func receive(_ raw: JSONObject) {
+        if raw.number("id") == 0 { return }
+        loadSender(raw)
+        let message = TelegramMessage(raw, users: users, chats: chatsByID)
+        thread(message.chatID).merge([message])
+    }
+
+    func sendText(chatID: Int64, text: String, replyID: Int64 = 0) {
+        var args: JSONObject = [
+            "chat_id": chatID,
+            "input_message_content": [
+                "@type": "inputMessageText",
+                "text": ["@type": "formattedText", "text": text, "entities": []],
+                "clear_draft": true, "disable_web_page_preview": false
+            ] as JSONObject
+        ]
+        if replyID > 0 {
+            args["reply_to"] = ["@type": "inputMessageReplyToMessage", "message_id": replyID]
+        }
+        command("sendMessage", args)
+    }
+
+    func sendMedia(chatID: Int64, fileURL: URL, kind: String, caption: String = "") {
+        let input: JSONObject = ["@type": "inputFileLocal", "path": fileURL.path]
+        let text: JSONObject = ["@type": "formattedText", "text": caption, "entities": []]
+        let message: JSONObject
+        switch kind {
+        case "photo":
+            message = ["@type": "inputMessagePhoto", "photo": input, "caption": text, "width": 0, "height": 0]
+        case "video":
+            message = ["@type": "inputMessageVideo", "video": input, "caption": text, "duration": 0,
+                       "width": 0, "height": 0, "supports_streaming": true]
+        case "voice":
+            message = ["@type": "inputMessageVoiceNote", "voice_note": input, "duration": 0, "waveform": ""]
+        default:
+            message = ["@type": "inputMessageDocument", "document": input, "caption": text]
+        }
+        command("sendMessage", ["chat_id": chatID, "input_message_content": message])
+    }
+
+    func download(_ fileID: Int, completion: @escaping (URL?) -> Void) {
+        request("downloadFile", ["file_id": fileID, "priority": 16,
+                                 "offset": 0, "limit": 0, "synchronous": true]) { response in
+            let path = response.object("local").text("path")
+            completion(path.isEmpty ? nil : URL(fileURLWithPath: path))
+        }
+    }
+
+    func delete(_ message: TelegramMessage) {
+        command("deleteMessages", ["chat_id": message.chatID, "message_ids": [message.id], "revoke": true])
+    }
+
+    func edit(_ message: TelegramMessage, newText: String) {
+        command("editMessageText", [
+            "chat_id": message.chatID, "message_id": message.id,
+            "input_message_content": ["@type": "inputMessageText",
+                                      "text": ["@type": "formattedText", "text": newText, "entities": []]]
+        ])
+    }
+
+    func forward(_ message: TelegramMessage, to targetID: Int64) {
+        command("forwardMessages", [
+            "chat_id": targetID, "from_chat_id": message.chatID,
+            "message_ids": [message.id], "send_copy": false,
+            "remove_caption": false, "only_preview": false
+        ])
+    }
+
+    func setPinned(chatID: Int64, value: Bool) {
+        command("toggleChatIsPinned", ["chat_list": ["@type": archived ? "chatListArchive" : "chatListMain"],
+                                       "chat_id": chatID, "is_pinned": value])
+    }
+
+    func archiveChat(chatID: Int64, value: Bool) {
+        command("addChatToList", ["chat_id": chatID,
+                                 "chat_list": ["@type": value ? "chatListArchive" : "chatListMain"]])
+    }
+
+    func markUnread(chatID: Int64) {
+        command("toggleChatIsMarkedAsUnread", ["chat_id": chatID, "is_marked_as_unread": true])
+    }
+
+    func deleteChat(chatID: Int64) {
+        command("deleteChatHistory", ["chat_id": chatID, "remove_from_chat_list": true, "revoke": false])
+    }
+
+    func search(_ query: String) {
+        if query.isEmpty { searchResults = []; return }
+        request("searchChatsOnServer", ["query": query, "limit": 30]) { [weak self] result in
+            guard let self else { return }
+            let ids = (result["chat_ids"] as? [NSNumber] ?? []).map(\.int64Value)
+            self.searchResults = ids.compactMap { self.chatsByID[$0] }
+            for id in ids where self.chatsByID[id] == nil {
+                self.request("getChat", ["chat_id": id]) { [weak self] object in
+                    if object.text("@type") == "chat" {
+                        self?.addChat(object)
+                        if let chat = self?.chatsByID[id] {
+                            self?.searchResults.append(chat)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func botAction(_ button: BotButton, message: TelegramMessage) {
+        switch button.kind {
+        case "inlineKeyboardButtonTypeUrl":
+            if let url = URL(string: button.value) { UIApplication.shared.open(url) }
+        case "inlineKeyboardButtonTypeCallback":
+            request("getCallbackQueryAnswer", [
+                "chat_id": message.chatID, "message_id": message.id,
+                "payload": ["@type": "callbackQueryPayloadData", "data": button.value]
+            ]) { response in
+                if !response.text("text").isEmpty {
+                    UIAccessibility.post(notification: .announcement, argument: response.text("text"))
+                }
+                if let url = URL(string: response.text("url")) { UIApplication.shared.open(url) }
+            }
+        default:
+            if !button.title.isEmpty { sendText(chatID: message.chatID, text: button.title) }
+        }
+    }
+
+    func translate(_ message: TelegramMessage) {
+        let content = message.body
+        Task {
+            do {
+                let translated = try await GoogleTranslate.translate(content)
+                thread(message.chatID).setTranslation(message.id, translated: translated)
+                UIAccessibility.post(notification: .announcement, argument: translated)
+            } catch {
+                UIAccessibility.post(notification: .announcement, argument: "翻譯失敗：\(error.localizedDescription)")
+            }
+        }
+    }
+}
