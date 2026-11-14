@@ -281,8 +281,17 @@ private func installChat() {
         let old = unsafeBitCast(method_getImplementation(class_getInstanceMethod(cls, sel)!), to: (@convention(c) (UIView, Selector) -> Void).self)
         let layout: @convention(block) (UIView) -> Void = { view in
             old(view, sel)
-            if UIAccessibility.isVoiceOverRunning, let vc = chatController(view), state(vc).pendingLatest {
-                DispatchQueue.main.async { [weak vc] in if let vc { configureChat(vc) } }
+            if UIAccessibility.isVoiceOverRunning {
+                if let vc = chatController(view), state(vc).pendingLatest {
+                    DispatchQueue.main.async { [weak vc] in if let vc { configureChat(vc) } }
+                }
+                // When the list inserts the next batch, recheck the current
+                // focus without issuing page-scrolled announcements.
+                if HistoryViewport(view) == nil,
+                   let focused = UIAccessibility.focusedElement(using: .notificationVoiceOver) as? UIView,
+                   focused.isDescendant(of: view) {
+                    prepareGlobalPagination(from: focused, fromLayout: true)
+                }
             }
         }
         replace(cls, "layoutSubviews", layout, "v@:")
@@ -324,6 +333,7 @@ public func AGStart() {
     installSupplementalControls()
     installChat()
     installHistoryReading()
+    installNativePageFocus()
     NSLog("[Accessi gram] 0.2.7 loaded; installed %ld target hooks", installed.count)
 }
 
@@ -940,6 +950,224 @@ private func prepareReadingEdge(_ element: UIView, history: HistoryViewport) {
     _ = history.prepareAdjacent(to: edge, direction: direction, preserving: element)
 }
 
+
+private enum GlobalReadingDirection {
+    case towardTop, towardBottom
+}
+private final class GlobalPaginationState: NSObject {
+    weak var lastFocus: UIView?
+    weak var lastRow: UIView?
+    var direction: GlobalReadingDirection?
+    var scheduled = false
+    var lastAttemptFocus: ObjectIdentifier?
+    var lastAttemptFirst: ObjectIdentifier?
+    var lastAttemptLast: ObjectIdentifier?
+    var lastAttemptOffset: CGFloat = .greatestFiniteMagnitude
+    var lastAttemptTime: TimeInterval = 0
+}
+private var globalPaginationKey: UInt8 = 0
+
+private func paginationState(_ root: UIView) -> GlobalPaginationState {
+    if let existing = objc_getAssociatedObject(root, &globalPaginationKey) as? GlobalPaginationState {
+        return existing
+    }
+    let state = GlobalPaginationState()
+    objc_setAssociatedObject(root, &globalPaginationKey, state, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    return state
+}
+
+private func listBackingAncestor(of focus: UIView) -> UIView? {
+    var candidate: UIView? = focus
+    while let view = candidate {
+        if className(view) == "_TtC7Display19ListViewBackingView" { return view }
+        candidate = view.superview
+    }
+    return nil
+}
+
+private func normalScrollAncestor(of focus: UIView) -> UIScrollView? {
+    var candidate = focus.superview
+    while let view = candidate {
+        if let scroll = view as? UIScrollView,
+           !(scroll is UITextView),
+           scroll.isScrollEnabled,
+           scroll.contentSize.height > scroll.bounds.height + 48,
+           scroll.bounds.height > 120,
+           scroll.contentSize.height > scroll.contentSize.width * 0.5 {
+            return scroll
+        }
+        candidate = view.superview
+    }
+    return nil
+}
+
+// This is scoped to a focused element inside a real scrollable surface; never
+// modify UIKit's shared accessibilityScroll or the keyboard's scroll views.
+private func prepareGlobalPagination(from focus: UIView, fromLayout: Bool = false) {
+    guard UIAccessibility.isVoiceOverRunning, focus.window != nil,
+          let focused = UIAccessibility.focusedElement(using: .notificationVoiceOver) as? UIView,
+          focused === focus || focused.isDescendant(of: focus) else { return }
+
+    if let backing = listBackingAncestor(of: focus),
+       HistoryViewport(backing) == nil,
+       let node = objectField(backing, "target"),
+       let scroller = objectField(node, "scroller") as? UIScrollView,
+       let window = backing.window {
+        let bounds = historyBounds(backing, chat: nil)
+        let mounted: [(UIView, CGRect)] = list(field(node, "itemNodes")).compactMap { raw in
+            guard let item = raw as? NSObject, let row = nodeView(item),
+                  visible(row, in: backing) else { return nil }
+            let rect = window.convert(row.bounds, from: row)
+            return rect.isEmpty ? nil : (row, rect)
+        }.sorted { $0.1.minY < $1.1.minY }
+        let visibleRows = mounted.filter { $0.1.intersection(bounds).height >= min(8, $0.1.height) }
+        guard visibleRows.count >= 2,
+              let index = visibleRows.firstIndex(where: { focus === $0.0 || focus.isDescendant(of: $0.0) })
+        else { return }
+
+        let state = paginationState(backing)
+        if !fromLayout && state.lastFocus !== focus {
+            if let previous = state.lastRow,
+               let oldIndex = visibleRows.firstIndex(where: { $0.0 === previous }), oldIndex != index {
+                state.direction = index > oldIndex ? .towardBottom : .towardTop
+            } else if state.direction == nil {
+                state.direction = index >= visibleRows.count - 2 ? .towardBottom :
+                    (index <= 1 ? .towardTop : nil)
+            }
+            state.lastFocus = focus
+            state.lastRow = visibleRows[index].0
+        }
+        guard let direction = state.direction else { return }
+        let nearEdge = direction == .towardBottom ? index >= visibleRows.count - 3 :
+            index <= 2
+        guard nearEdge else { return }
+        let focusFrame = window.convert(focus.bounds, from: focus)
+        guard focusFrame.intersects(bounds) else { return }
+        let first = mounted.first.map { ObjectIdentifier($0.0) }
+        let last = mounted.last.map { ObjectIdentifier($0.0) }
+        let now = ProcessInfo.processInfo.systemUptime
+        if state.lastAttemptFocus == ObjectIdentifier(focus),
+           state.lastAttemptFirst == first, state.lastAttemptLast == last,
+           abs(state.lastAttemptOffset - scroller.contentOffset.y) < 1,
+           now - state.lastAttemptTime < 2 { return }
+        guard !state.scheduled else { return }
+        state.scheduled = true
+        DispatchQueue.main.async { [weak focus, weak backing] in
+            defer { state.scheduled = false }
+            guard let focus, let backing, backing.window != nil,
+                  let actual = UIAccessibility.focusedElement(using: .notificationVoiceOver) as? UIView,
+                  actual === focus || actual.isDescendant(of: focus),
+                  !scroller.isDragging, !scroller.isDecelerating, !scroller.isTracking else { return }
+
+            let currentBounds = historyBounds(backing, chat: nil)
+            let currentFocus = window.convert(focus.bounds, from: focus)
+            guard currentFocus.intersects(currentBounds) else { return }
+            let retained = min(48, currentFocus.height / 2)
+            let maxDistance = direction == .towardBottom
+                ? currentFocus.maxY - currentBounds.minY - retained
+                : currentBounds.maxY - currentFocus.minY - retained
+            // A small lookahead exposes the next real row without dropping the
+            // current VoiceOver reading element off the screen.
+            let edge = direction == .towardBottom ? mounted.last : mounted.first
+            let outside = edge.map { entry in
+                direction == .towardBottom ? entry.1.minY - currentBounds.maxY + 72 :
+                    currentBounds.minY - entry.1.maxY + 72
+            } ?? currentBounds.height * 0.28
+            let distance = min(currentBounds.height * 0.5,
+                               max(0, maxDistance),
+                               max(96, outside))
+            let rotated = field(node, "rotated") as? Bool == true
+            let sign: CGFloat = (direction == .towardTop) == rotated ? 1 : -1
+            let minimum = -scroller.adjustedContentInset.top
+            let maximum = max(minimum,
+                              scroller.contentSize.height - scroller.bounds.height +
+                              scroller.adjustedContentInset.bottom)
+            let destination = min(maximum, max(minimum, scroller.contentOffset.y + sign * distance))
+            state.lastAttemptFocus = ObjectIdentifier(focus)
+            state.lastAttemptFirst = first
+            state.lastAttemptLast = last
+            state.lastAttemptOffset = scroller.contentOffset.y
+            state.lastAttemptTime = ProcessInfo.processInfo.systemUptime
+            if abs(destination - scroller.contentOffset.y) > 1 {
+                scroller.setContentOffset(CGPoint(x: scroller.contentOffset.x, y: destination),
+                                          animated: false)
+            }
+        }
+        return
+    }
+
+    guard !fromLayout, let scroll = normalScrollAncestor(of: focus),
+          let window = scroll.window else { return }
+    let state = paginationState(scroll)
+    let current = window.convert(focus.bounds, from: focus)
+    let viewport = window.convert(scroll.bounds, from: scroll)
+    let last = state.lastFocus
+    let oldY = last.flatMap { $0.window?.convert($0.bounds, from: $0).midY }
+    let direction: GlobalReadingDirection
+    if let oldY, last !== focus {
+        direction = current.midY >= oldY ? .towardBottom : .towardTop
+    } else if let existing = state.direction {
+        direction = existing
+    } else {
+        direction = current.midY > viewport.midY ? .towardBottom : .towardTop
+    }
+    state.lastFocus = focus
+    state.direction = direction
+    let gap = direction == .towardBottom ?
+        viewport.maxY - current.maxY : current.minY - viewport.minY
+    guard gap < max(100, viewport.height * 0.25), !state.scheduled else { return }
+    let now = ProcessInfo.processInfo.systemUptime
+    if state.lastAttemptFocus == ObjectIdentifier(focus),
+       abs(state.lastAttemptOffset - scroll.contentOffset.y) < 1,
+       now - state.lastAttemptTime < 2 { return }
+    state.scheduled = true
+    DispatchQueue.main.async { [weak focus, weak scroll] in
+        defer { state.scheduled = false }
+        guard let focus, let scroll, scroll.window != nil,
+              let actual = UIAccessibility.focusedElement(using: .notificationVoiceOver) as? UIView,
+              actual === focus || actual.isDescendant(of: focus),
+              !scroll.isDragging, !scroll.isDecelerating, !scroll.isTracking else { return }
+        let focusFrame = window.convert(focus.bounds, from: focus)
+        let bounds = window.convert(scroll.bounds, from: scroll)
+        guard focusFrame.intersects(bounds) else { return }
+        let retained = min(44, focusFrame.height / 2)
+        let maxDistance = direction == .towardBottom ?
+            focusFrame.maxY - bounds.minY - retained :
+            bounds.maxY - focusFrame.minY - retained
+        let distance = min(bounds.height * 0.35, max(0, maxDistance))
+        let minY = -scroll.adjustedContentInset.top
+        let maxY = max(minY, scroll.contentSize.height - scroll.bounds.height +
+                       scroll.adjustedContentInset.bottom)
+        let sign: CGFloat = direction == .towardBottom ? 1 : -1
+        let targetY = min(maxY, max(minY, scroll.contentOffset.y + sign * distance))
+        state.lastAttemptFocus = ObjectIdentifier(focus)
+        state.lastAttemptOffset = scroll.contentOffset.y
+        state.lastAttemptTime = ProcessInfo.processInfo.systemUptime
+        if abs(targetY - scroll.contentOffset.y) > 1 {
+            scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: targetY),
+                                    animated: false)
+        }
+    }
+}
+
+private func installNativePageFocus() {
+    for name in ["UITableViewCell", "UICollectionViewCell", "UILabel", "UIButton"] {
+        target(name) { cls in
+            let selector = NSSelectorFromString("accessibilityElementDidBecomeFocused")
+            guard let method = class_getInstanceMethod(cls, selector) else { return }
+            let original = unsafeBitCast(method_getImplementation(method),
+                                         to: (@convention(c) (UIView, Selector) -> Void).self)
+            let focused: @convention(block) (UIView) -> Void = { view in
+                original(view, selector)
+                if UIAccessibility.isVoiceOverRunning {
+                    prepareGlobalPagination(from: view)
+                }
+            }
+            replace(cls, "accessibilityElementDidBecomeFocused", focused, "v@:")
+        }
+    }
+}
+
 private func isMainHistory(_ listNode: NSObject, chat: UIViewController) -> Bool {
     guard let node = chatNode(chat), let history = field(node, "historyNode") else { return false }
     return objectField(history, "listView") === listNode
@@ -1032,11 +1260,14 @@ private func installHistoryReading() {
         let oldFocus = unsafeBitCast(method_getImplementation(class_getInstanceMethod(cls, focusSel)!), to: (@convention(c) (UIView, Selector) -> Void).self)
         let focus: @convention(block) (UIView) -> Void = { view in
             oldFocus(view, focusSel)
-            guard UIAccessibility.isVoiceOverRunning,
-                  attachedNode(view).map(className) == "_TtC7Display21AccessibilityAreaNode",
-                  let history = HistoryViewport(containing: view) else { return }
-            state(history.chat).pendingLatest = false
-            prepareReadingEdge(view, history: history)
+            guard UIAccessibility.isVoiceOverRunning else { return }
+            if attachedNode(view).map(className) == "_TtC7Display21AccessibilityAreaNode",
+               let history = HistoryViewport(containing: view) {
+                state(history.chat).pendingLatest = false
+                prepareReadingEdge(view, history: history)
+            } else {
+                prepareGlobalPagination(from: view)
+            }
         }
         replace(cls, "accessibilityElementDidBecomeFocused", focus, "v@:")
 
