@@ -40,8 +40,8 @@ final class NativeMediaScreen: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        title = message.fileKind == "voice" || message.fileKind == "audio"
-            ? "播放語音訊息" : "檢視附件"
+        title = message.fileKind == "voice" ? "播放語音訊息"
+            : message.fileKind == "audio" ? "音訊播放器" : "檢視附件"
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             title: "關閉", style: .plain, target: self, action: #selector(close)
         )
