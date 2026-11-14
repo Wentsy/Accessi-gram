@@ -20,8 +20,6 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - Sources
-      - Shared/ShareMailbox.swift
-      - Shared/ShareSessionBootstrap.swift
       - Resources/LaunchScreen.storyboard
     dependencies:
       - package: TDLibFramework
@@ -42,7 +40,6 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/AppInfo.plist
-        CODE_SIGN_ENTITLEMENTS: Resources/App.entitlements
         INFOPLIST_KEY_CFBundleDisplayName: "Accessi Gram"
         INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "錄製語音訊息"
@@ -55,6 +52,7 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - ShareExtension/ShareViewController.swift
+      - ShareExtension/ShareLoginController.swift
       - ShareExtension/ExtensionTelegramSender.swift
       - Shared/ShareMailbox.swift
       - Shared/ShareSessionBootstrap.swift
@@ -69,6 +67,5 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.accessigram.native.share
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: ShareExtension/Info.plist
-        CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
         CODE_SIGN_STYLE: Automatic
         APPLICATION_EXTENSION_API_ONLY: YES
