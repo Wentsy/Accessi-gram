@@ -10,6 +10,7 @@ struct ChatScreen: View {
     @State private var draft = ""
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var showFiles = false
+    @State private var attachmentStatus = ""
     @State private var showPhotos = false
     @State private var menuMessage: TelegramMessage?
     @State private var showingMessageMenu = false
@@ -58,6 +59,11 @@ struct ChatScreen: View {
                 }
             }
             composer
+            if !attachmentStatus.isEmpty {
+                Text(attachmentStatus)
+                    .font(.footnote)
+                    .accessibilityLabel(attachmentStatus)
+            }
         }
         .navigationTitle(service.chatTitle(chatID))
         .navigationBarTitleDisplayMode(.inline)
@@ -116,24 +122,32 @@ struct ChatScreen: View {
             }
         }
         .photosPicker(isPresented: $showPhotos, selection: $selectedPhoto, matching: .any(of: [.images, .videos]))
-        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { selection in
-            switch selection {
-            case .success(let urls):
-                for url in urls {
+        .sheet(isPresented: $showFiles) {
+            AccessibleDocumentPicker(
+                onSelect: { urls in
+                    showFiles = false
+                    attachmentStatus = "正在準備 \(urls.count) 個檔案"
                     Task {
-                        do {
-                            let local = try await AttachmentPreparation.copyFromFiles(url)
-                            // A file chosen in Files is sent as a document,
-                            // preserving its original filename and format.
-                            service.sendMedia(chatID: chatID, fileURL: local, kind: "document")
-                        } catch {
-                            service.errorMessage = "無法傳送檔案 \(url.lastPathComponent)：\(error.localizedDescription)"
+                        for url in urls {
+                            do {
+                                let local = try await AttachmentPreparation.copyFromFiles(url)
+                                service.sendMedia(chatID: chatID, fileURL: local, kind: "document")
+                                UIAccessibility.post(notification: .announcement,
+                                                     argument: "已提交 \(url.lastPathComponent) 至 Telegram")
+                            } catch {
+                                let reason = "無法傳送 \(url.lastPathComponent)：\(error.localizedDescription)"
+                                service.errorMessage = reason
+                                UIAccessibility.post(notification: .announcement, argument: reason)
+                            }
                         }
+                        attachmentStatus = ""
                     }
+                },
+                onCancel: {
+                    showFiles = false
+                    attachmentStatus = ""
                 }
-            case .failure(let error):
-                service.errorMessage = "無法讀取所選附件：\(error.localizedDescription)"
-            }
+            )
         }
         .onChange(of: selectedPhoto) { selection in
             guard let selection else { return }
