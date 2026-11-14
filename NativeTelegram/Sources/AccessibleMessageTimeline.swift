@@ -96,9 +96,6 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
         private func configure(_ cell: MessageRow, message: TelegramMessage, index: Int) {
             let copy = message
             cell.configure(copy) { [weak self] in
-                guard let self else { return }
-                if index < 30 { self.loadOlder() }
-            } onActivate: { [weak self] in
                 self?.onMenu(copy)
             } onMedia: { [weak self] in
                 self?.onMedia(copy)
@@ -215,7 +212,6 @@ final class MessageTailRedirect: UIView {
 }
 
 final class MessageRow: UITableViewCell {
-    private var onFocus: (() -> Void)?
     private var onActivate: (() -> Void)?
     private let content = UILabel()
 
@@ -243,7 +239,6 @@ final class MessageRow: UITableViewCell {
 
     func configure(
         _ message: TelegramMessage,
-        onFocus: @escaping () -> Void,
         onActivate: @escaping () -> Void,
         onMedia: @escaping () -> Void,
         onTranslate: @escaping () -> Void,
@@ -257,7 +252,6 @@ final class MessageRow: UITableViewCell {
         accessibilityHint = (message.fileKind == "voice" || message.fileKind == "audio")
             ? "點兩下播放語音訊息；上下滑動可選擇其他操作"
             : "上下滑動選擇翻譯、回覆或其他操作，點兩下開啟訊息選單"
-        self.onFocus = onFocus
         self.onActivate = (message.fileKind == "voice" || message.fileKind == "audio")
             ? onMedia : onActivate
         var actions = [
@@ -291,7 +285,6 @@ final class MessageRow: UITableViewCell {
         if UIAccessibility.isVoiceOverRunning {
             ComposerBarView.active?.dismissKeyboardForReading()
         }
-        onFocus?()
     }
 
     override func accessibilityActivate() -> Bool {
@@ -301,7 +294,6 @@ final class MessageRow: UITableViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        onFocus = nil
         onActivate = nil
         accessibilityCustomActions = nil
     }
