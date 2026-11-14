@@ -56,7 +56,7 @@ struct ChatScreen: View {
                         .lineLimit(1)
                         .accessibilityLabel("目前回覆 \(reply.sender)，\(reply.body)")
                     Spacer()
-                    Button("取消回覆", systemImage: "xmark") { thread.replyTo = nil }
+                    Button { thread.replyTo = nil } label: { Label("取消回覆", systemImage: "xmark") }
                         .labelStyle(.iconOnly)
                 }
                 .padding(.horizontal)
@@ -187,16 +187,16 @@ struct ChatScreen: View {
                     .accessibilityLabel("訊息編輯框")
 
                 if voice.isRecording {
-                    Button("停止並傳送", systemImage: "stop.circle.fill") {
+                    Button {
                         if let url = voice.stop() {
                             service.sendMedia(chatID: chatID, fileURL: url, kind: "voice")
                         }
-                    }
+                    } label: { Label("停止並傳送", systemImage: "stop.circle.fill") }
                     .labelStyle(.iconOnly)
-                    Button("取消錄音", systemImage: "xmark.circle") { voice.cancel() }
+                    Button { voice.cancel() } label: { Label("取消錄音", systemImage: "xmark.circle") }
                         .labelStyle(.iconOnly)
                 } else if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button("傳送", systemImage: "arrow.up.circle.fill") { sendDraft() }
+                    Button { sendDraft() } label: { Label("傳送", systemImage: "arrow.up.circle.fill") }
                         .labelStyle(.iconOnly)
                         .accessibilityHint("傳送文字訊息")
                 } else {
