@@ -38,6 +38,22 @@ final class ComposerBarView: UIView, UITextViewDelegate {
         UIAccessibility.post(notification: .layoutChanged, argument: photo)
     }
 
+    func dismissKeyboardForReading() {
+        // Dismissing on every message focus interrupts VoiceOver swipes.
+        // Only the transition out of the editor needs to close the keyboard.
+        if editor.isFirstResponder {
+            editor.resignFirstResponder()
+        }
+    }
+
+    func insertBotCommand(_ command: String) {
+        editor.text = command + " "
+        placeholder.isHidden = true
+        onTextChanged?(editor.text)
+        editor.becomeFirstResponder()
+        UIAccessibility.post(notification: .layoutChanged, argument: editor)
+    }
+
     var onTextChanged: ((String) -> Void)?
     var onPhotos: (() -> Void)?
     var onFiles: (() -> Void)?
