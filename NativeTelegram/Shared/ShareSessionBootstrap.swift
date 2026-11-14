@@ -39,20 +39,31 @@ enum ShareSessionBootstrap {
     }
 
     static func configuration() throws -> ShareSessionConfiguration {
-        if FileManager.default.fileExists(atPath: configURL.path) {
-            return try JSONDecoder().decode(
-                ShareSessionConfiguration.self, from: Data(contentsOf: configURL)
-            )
-        }
-
         let info = Bundle.main.infoDictionary ?? [:]
         let idText = (info["TelegramAPIID"] as? String)
             ?? "\(info["TelegramAPIID"] as? Int ?? 0)"
-        let hash = (info["TelegramAPIHash"] as? String) ?? ""
-        guard let id = Int(idText), id > 0, !hash.isEmpty else {
+        let bundledHash = (info["TelegramAPIHash"] as? String) ?? ""
+        let bundledID = Int(idText) ?? 0
+
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            let saved = try JSONDecoder().decode(
+                ShareSessionConfiguration.self, from: Data(contentsOf: configURL)
+            )
+            // A previous build may have saved an invalid/manual credential pair.
+            // Prefer the credentials injected into this build and clear only the
+            // share extension's own TDLib state when they changed.
+            if bundledID > 0, !bundledHash.isEmpty,
+               (saved.apiID != bundledID || saved.apiHash != bundledHash) {
+                try reset()
+                return try saveCredentials(apiID: bundledID, apiHash: bundledHash)
+            }
+            return saved
+        }
+
+        guard bundledID > 0, !bundledHash.isEmpty else {
             throw ShareSessionError.missingAPICredentials
         }
-        return try saveCredentials(apiID: id, apiHash: hash)
+        return try saveCredentials(apiID: bundledID, apiHash: bundledHash)
     }
 
     @discardableResult
