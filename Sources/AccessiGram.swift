@@ -318,7 +318,7 @@ public func AGStart() {
     installSupplementalControls()
     installChat()
     installHistoryReading()
-    NSLog("[Accessi gram] 0.2.5 loaded; installed %ld target hooks", installed.count)
+    NSLog("[Accessi gram] 0.2.6 loaded; installed %ld target hooks", installed.count)
 }
 
 private func objectField(_ object: Any, _ name: String) -> NSObject? {
@@ -430,6 +430,7 @@ private func isModalNode(_ node: NSObject) -> Bool {
     return name == "_TtC7Display24NavigationModalContainer" ||
         name == "_TtC9GalleryUI21GalleryControllerNode" ||
         name == "_TtC7Display19AlertControllerNode" ||
+        name == "_TtC7Display25ActionSheetControllerNode" ||
         name == "_TtC15ShareController19ShareControllerNode" ||
         name == "_TtC27ChatEntityKeyboardInputNode27ChatEntityKeyboardInputNode" ||
         name == "_TtC21ContextControllerImpl21ContextControllerNode" ||
@@ -448,8 +449,10 @@ private func overlayEscape(_ node: NSObject) -> Bool {
     case "_TtC15ShareController19ShareControllerNode":
         return send(node, "cancelButtonPressed")
     case "_TtC7Display19AlertControllerNode":
-        if let dismiss = field(node, "dismiss") as? (Bool) -> Void { dismiss(true); return true }
         return invoke(node, "dismiss")
+    case "_TtC7Display25ActionSheetControllerNode":
+        if let dismiss = field(node, "dismiss") as? (Bool) -> Void { dismiss(true); return true }
+        return false
     case "_TtC27ChatEntityKeyboardInputNode27ChatEntityKeyboardInputNode":
         return invoke(node, "switchToTextInput")
     case "_TtC21ContextControllerImpl21ContextControllerNode":
@@ -461,6 +464,72 @@ private func overlayEscape(_ node: NSObject) -> Bool {
     default: return false
     }
 }
+
+private final class ModalCache: NSObject {
+    var actions: [ObjectIdentifier: ActionElement] = [:]
+    var textElements: [String: UIAccessibilityElement] = [:]
+}
+private var modalCacheKey: UInt8 = 0
+
+private func modalElements(_ root: UIView, node: NSObject) -> NSArray? {
+    let kind = className(node)
+    guard kind == "_TtC7Display19AlertControllerNode" ||
+          kind == "_TtC7Display25ActionSheetControllerNode" else { return nil }
+    let cache = (objc_getAssociatedObject(root, &modalCacheKey) as? ModalCache) ?? ModalCache()
+    objc_setAssociatedObject(root, &modalCacheKey, cache, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    var result: [Any] = []
+    var nodes: [NSObject] = []
+    if kind == "_TtC7Display19AlertControllerNode",
+       let content = objectField(node, "contentNode") {
+        for name in ["titleNode", "textAccessibilityNode", "textNode"] {
+            guard let source = objectField(content, name), let area = nodeView(source),
+                  visible(area, in: root), !area.bounds.isEmpty,
+                  let label = text(source) ?? area.accessibilityLabel, !label.isEmpty else { continue }
+            let element = cache.textElements[name] ?? UIAccessibilityElement(accessibilityContainer: root)
+            cache.textElements[name] = element
+            element.accessibilityLabel = label
+            element.accessibilityTraits = name == "titleNode" ? [.header, .staticText] : .staticText
+            element.accessibilityFrameInContainerSpace = root.convert(area.bounds, from: area)
+            result.append(element)
+        }
+        nodes = list(field(content, "actionNodes")).compactMap { $0 as? NSObject }
+    } else {
+        nodes = descendants(root).compactMap { view in
+            guard let candidate = attachedNode(view) else { return nil }
+            let kind = className(candidate)
+            return kind == "_TtC7Display21ActionSheetButtonNode" ||
+                   kind == "_TtC7Display27ActionSheetCheckboxItemNode" ||
+                   kind == "_TtC7Display21ActionSheetSwitchNode" ? candidate : nil
+        }
+    }
+    var active = Set<ObjectIdentifier>()
+    for action in nodes {
+        guard let button = nodeView(action), visible(button, in: root), !button.bounds.isEmpty else { continue }
+        let item = field(action, "action") ?? field(action, "item")
+        let label = (item.flatMap { field($0, "title") as? String } ??
+                     text(field(action, "titleNode")) ??
+                     text(field(action, "label")) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { continue }
+        let key = ObjectIdentifier(action)
+        active.insert(key)
+        let element = cache.actions[key] ?? ActionElement(accessibilityContainer: root)
+        cache.actions[key] = element
+        element.accessibilityLabel = label
+        element.accessibilityTraits = .button
+        if field(action, "actionEnabled") as? Bool == false {
+            element.accessibilityTraits.insert(.notEnabled)
+        }
+        element.accessibilityFrameInContainerSpace = root.convert(button.bounds, from: button)
+        element.activate = { [weak action] in
+            guard let action, field(action, "actionEnabled") as? Bool != false else { return false }
+            return send(action, "performAction")
+        }
+        result.append(element)
+    }
+    cache.actions = cache.actions.filter { active.contains($0.key) }
+    return result.isEmpty ? nil : result as NSArray
+}
+
 private func installOverlayViews() {
     target("_ASDisplayView") { cls in
         let movedSel = NSSelectorFromString("didMoveToWindow")
@@ -472,6 +541,18 @@ private func installOverlayViews() {
             }
         }
         replace(cls, "didMoveToWindow", moved, "v@:")
+
+        let elementsSel = NSSelectorFromString("accessibilityElements")
+        let originalElements = unsafeBitCast(method_getImplementation(class_getInstanceMethod(cls, elementsSel)!), to: (@convention(c) (UIView, Selector) -> NSArray?).self)
+        let elements: @convention(block) (UIView) -> NSArray? = { view in
+            if UIAccessibility.isVoiceOverRunning, view.window != nil,
+               let node = attachedNode(view), let items = modalElements(view, node: node) {
+                return items
+            }
+            return originalElements(view, elementsSel)
+        }
+        replace(cls, "accessibilityElements", elements, "@@:")
+
         let old = originalBool(cls, "accessibilityPerformEscape")
         let escape: @convention(block) (UIView) -> Bool = { view in
             if old?(view) == true { return true }
@@ -696,11 +777,16 @@ private struct HistoryViewport {
         let bounds = self.bounds
         return list(field(node, "itemNodes")).compactMap { raw -> (UIView, CGRect)? in
             guard let item = raw as? NSObject, field(item, "index") != nil,
+                  isHistoryMessage(item),
                   let row = nodeView(item), visible(row, in: view) else { return nil }
             let area = messageElement(item, row: row)
-            guard area !== row || isHistoryMessage(item) else { return nil }
+            let label = (area.accessibilityLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = (area.accessibilityValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            // Empty recycled nodes are not messages and must not become VoiceOver buttons.
+            guard !label.isEmpty || !value.isEmpty else { return nil }
             let rect = window.convert(area.bounds, from: area)
-            guard mounted || rect.intersection(bounds).height >= min(8, rect.height) else { return nil }
+            guard !rect.isEmpty,
+                  mounted || rect.intersection(bounds).height >= min(8, rect.height) else { return nil }
             return (area, rect)
         }.sorted { $0.1.minY < $1.1.minY }
     }
@@ -754,10 +840,11 @@ private struct HistoryViewport {
             : anchor.maxY - bounds.minY - overlap
         let revealDistance = neighbor.map {
             direction == .older
-                ? bounds.minY - $0.maxY + min(44, $0.height)
-                : $0.minY - bounds.maxY + min(44, $0.height)
-        } ?? bounds.height * 0.85
-        return scroll(direction, distance: min(retainedDistance, revealDistance))
+                ? bounds.minY - $0.maxY + min(64, $0.height)
+                : $0.minY - bounds.maxY + min(64, $0.height)
+        } ?? bounds.height * 0.65
+        return scroll(direction, distance: min(max(0, retainedDistance),
+                                               max(0, min(bounds.height * 0.8, revealDistance))))
     }
 }
 
@@ -766,70 +853,23 @@ private func isHistoryMessage(_ item: NSObject) -> Bool {
         field(item, "accessibilityData") != nil
 }
 
-private final class HistoryBoundary: UIAccessibilityElement {
-    let direction: HistoryDirection
-    weak var viewport: UIView?
-    weak var anchor: UIView?
-
-    init(view: UIView, direction: HistoryDirection) {
-        self.viewport = view
-        self.direction = direction
-        super.init(accessibilityContainer: view)
-        accessibilityLabel = direction == .older ? "載入較早的訊息" : "載入較新的訊息"
-        accessibilityTraits = [.button, .causesPageTurn]
-    }
-
-    override func accessibilityElementDidBecomeFocused() {
-        _ = accessibilityActivate()
-    }
-
-    override func accessibilityActivate() -> Bool {
-        guard let viewport, let history = HistoryViewport(viewport), let anchor else { return false }
-        state(history.chat).pendingLatest = false
-        return pageHistory(history, direction: direction, anchor: anchor, boundary: self)
-    }
-
-    override func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
-        guard HistoryDirection(direction.rawValue) == self.direction else { return false }
-        return accessibilityActivate()
-    }
-}
-
-private final class HistoryBoundaries: NSObject {
-    let older: HistoryBoundary
-    let newer: HistoryBoundary
-    init(_ view: UIView) {
-        older = HistoryBoundary(view: view, direction: .older)
-        newer = HistoryBoundary(view: view, direction: .newer)
-    }
-}
-private var historyBoundariesKey: UInt8 = 0
-
-private func addHistoryBoundaries(_ elements: [UIView], history: HistoryViewport) -> [Any] {
+// Keep the focus on a real message. Reveal neighboring content before the next flick.
+private func prepareReadingEdge(_ element: UIView, history: HistoryViewport) {
     let rows = history.messages()
-    guard let first = rows.first, let last = rows.last, let window = history.view.window else { return elements }
-    let view = history.view
-    let cached = objc_getAssociatedObject(view, &historyBoundariesKey) as? HistoryBoundaries
-    let boundaries = cached ?? HistoryBoundaries(view)
-    if cached == nil { objc_setAssociatedObject(view, &historyBoundariesKey, boundaries, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
-    var result: [Any] = elements
-    let bounds = history.bounds
-    for (boundary, row) in [(boundaries.older, first), (boundaries.newer, last)] {
-        let direction = boundary.direction
-        guard history.adjacent(to: row.element, direction: direction) != nil ||
-            history.hasHistory(direction) || history.scrollTarget(direction, distance: bounds.height * 0.8) != nil else {
-            continue
-        }
-        boundary.anchor = row.element
-        // Put the semantic boundary within the viewport; a zero-size or clipped element
-        // is skipped by VoiceOver and the next swipe escapes to the chat controls.
-        let y = direction == .older ? bounds.minY : bounds.maxY - 12
-        let frame = CGRect(x: bounds.midX - 24, y: y, width: 48, height: 12)
-        boundary.accessibilityFrameInContainerSpace = view.convert(frame, from: window)
-        if direction == .older { result.insert(boundary, at: 0) }
-        else { result.append(boundary) }
-    }
-    return result
+    guard rows.count >= 2,
+          let index = rows.firstIndex(where: { $0.element === element }) else { return }
+    let direction: HistoryDirection
+    let edge: UIView
+    if index <= 1 {
+        direction = .older
+        edge = rows[0].element
+    } else if index >= rows.count - 2 {
+        direction = .newer
+        edge = rows[rows.count - 1].element
+    } else { return }
+    if let next = history.adjacent(to: edge, direction: direction),
+       next.frame.intersection(history.bounds).height >= min(64, next.frame.height) { return }
+    _ = history.prepareAdjacent(to: edge, direction: direction)
 }
 
 private func isMainHistory(_ listNode: NSObject, chat: UIViewController) -> Bool {
@@ -841,93 +881,79 @@ private final class HistoryPageRequest: NSObject {
     let direction: HistoryDirection
     let startingRows: Set<ObjectIdentifier>
     weak var anchor: UIView?
-    weak var boundary: HistoryBoundary?
-    var didMove = false
+    var didMove: Bool
 
-    init(direction: HistoryDirection, startingRows: Set<ObjectIdentifier>) {
+    init(direction: HistoryDirection, rows: Set<ObjectIdentifier>, anchor: UIView?, moved: Bool) {
         self.direction = direction
-        self.startingRows = startingRows
+        self.startingRows = rows
+        self.anchor = anchor
+        self.didMove = moved
     }
 }
 private var historyPageKey: UInt8 = 0
 
-private func pageHistory(_ history: HistoryViewport, direction: HistoryDirection, anchor: UIView? = nil, boundary: HistoryBoundary? = nil) -> Bool {
+private func pageHistory(_ history: HistoryViewport, direction: HistoryDirection, anchor: UIView? = nil) -> Bool {
     let view = history.view
     if let pending = objc_getAssociatedObject(view, &historyPageKey) as? HistoryPageRequest,
-       pending.direction == direction, pending.anchor === anchor, pending.boundary === boundary { return true }
-    objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+       pending.direction == direction && pending.anchor === anchor { return true }
 
-    let visibleRows = history.messages()
-    let rows = Set(visibleRows.map { ObjectIdentifier($0.element) })
-    let edge = anchor.flatMap { element in visibleRows.first { $0.element === element }?.frame }
-    let moved: Bool
-    if let anchor {
-        let prepared = history.prepareAdjacent(to: anchor, direction: direction)
-        moved = prepared || (boundary != nil && history.scroll(direction, distance: history.bounds.height * 0.8))
-    }
-    else { moved = history.scroll(direction, distance: history.bounds.height * 0.85) }
-    guard moved || history.hasHistory(direction) || anchor.flatMap({ history.adjacent(to: $0, direction: direction) }) != nil else { return false }
+    let identifiers = Set(history.messages().map { ObjectIdentifier($0.element) })
+    let moved = anchor.map { history.prepareAdjacent(to: $0, direction: direction) }
+        ?? history.scroll(direction, distance: history.bounds.height * 0.72)
+    guard moved || history.hasHistory(direction) ||
+        anchor.flatMap({ history.adjacent(to: $0, direction: direction) }) != nil else { return false }
 
-    let request = HistoryPageRequest(direction: direction, startingRows: rows)
-    request.anchor = anchor
-    request.boundary = boundary
-    request.didMove = moved
+    let request = HistoryPageRequest(direction: direction, rows: identifiers, anchor: anchor, moved: moved)
     objc_setAssociatedObject(view, &historyPageKey, request, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     let deadline = ProcessInfo.processInfo.systemUptime + 8
-    func complete(_ view: UIView) {
+
+    func finish(_ view: UIView) {
         guard (objc_getAssociatedObject(view, &historyPageKey) as? HistoryPageRequest) === request else { return }
-        if let history = HistoryViewport(view), UIAccessibility.isVoiceOverRunning {
-            let rows = history.messages()
-            if anchor != nil || request.boundary != nil {
-                let focused = UIAccessibility.focusedElement(using: .notificationVoiceOver) as AnyObject?
-                let mayContinue = (focused != nil && focused === request.anchor) ||
-                    (focused != nil && focused === request.boundary)
-                guard mayContinue else {
-                    objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-                    return
-                }
-                let adjacent = request.anchor.flatMap { history.adjacent(to: $0, direction: direction) }
-                let fresh = rows.filter { !request.startingRows.contains(ObjectIdentifier($0.element)) }
-                let directional = fresh.filter {
-                    guard let edge else { return true }
-                    return direction == .older ? $0.frame.midY < edge.midY : $0.frame.midY > edge.midY
-                }
-                let newRow = direction == .older ? (directional.last ?? fresh.last) : (directional.first ?? fresh.first)
-                let visibleAdjacent = adjacent.flatMap { next in rows.first { $0.element === next.element } }
-                if let next = visibleAdjacent ?? newRow {
-                    objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-                    UIAccessibility.post(notification: .layoutChanged, argument: next.element)
-                    return
-                }
-                if ProcessInfo.processInfo.systemUptime < deadline,
-                   adjacent != nil || history.hasHistory(direction) || request.didMove {
-                    let prepared = request.anchor.map { history.prepareAdjacent(to: $0, direction: direction) } ?? false
-                    request.didMove = prepared || (request.boundary != nil &&
-                        history.scroll(direction, distance: history.bounds.height * 0.8))
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak view] in
-                        if let view { complete(view) }
-                    }
-                    return
-                }
-            } else {
-                if rows.contains(where: { !request.startingRows.contains(ObjectIdentifier($0.element)) }) || request.didMove {
-                    objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-                    UIAccessibility.post(notification: .pageScrolled, argument: nil)
-                    return
-                }
-                if history.hasHistory(direction), ProcessInfo.processInfo.systemUptime < deadline {
-                    request.didMove = history.scroll(direction, distance: history.bounds.height * 0.85)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak view] in
-                        if let view { complete(view) }
-                    }
-                    return
-                }
-            }
+        guard UIAccessibility.isVoiceOverRunning, let current = HistoryViewport(view) else {
+            objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            return
         }
-        objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        let rows = current.messages()
+        let changed = rows.contains { !request.startingRows.contains(ObjectIdentifier($0.element)) }
+        if let anchor = request.anchor {
+            // Read All only advances if the user is still reading the same message.
+            let focus = UIAccessibility.focusedElement(using: .notificationVoiceOver) as AnyObject?
+            guard focus === anchor else {
+                objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                return
+            }
+            if let next = current.adjacent(to: anchor, direction: direction),
+               next.frame.intersection(current.bounds).height >= min(12, next.frame.height) {
+                objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                UIAccessibility.post(notification: .layoutChanged, argument: next.element)
+                return
+            }
+            if changed, let next = (direction == .older ? rows.last : rows.first) {
+                objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                UIAccessibility.post(notification: .layoutChanged, argument: next.element)
+                return
+            }
+        } else if changed || request.didMove {
+            objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            UIAccessibility.post(notification: .pageScrolled, argument: nil)
+            return
+        }
+        if ProcessInfo.processInfo.systemUptime < deadline &&
+            (current.hasHistory(direction) || request.didMove) {
+            if let anchor = request.anchor {
+                request.didMove = current.prepareAdjacent(to: anchor, direction: direction) || request.didMove
+            } else if !request.didMove {
+                request.didMove = current.scroll(direction, distance: current.bounds.height * 0.72)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak view] in
+                if let view { finish(view) }
+            }
+        } else {
+            objc_setAssociatedObject(view, &historyPageKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak view] in
-        if let view { complete(view) }
+        if let view { finish(view) }
     }
     return true
 }
@@ -941,14 +967,8 @@ private func installHistoryReading() {
             guard UIAccessibility.isVoiceOverRunning,
                   attachedNode(view).map(className) == "_TtC7Display21AccessibilityAreaNode",
                   let history = HistoryViewport(containing: view) else { return }
-            let rows = history.messages()
             state(history.chat).pendingLatest = false
-            // At a visible edge, expose the neighboring bubble before the next swipe.
-            let direction: HistoryDirection
-            if rows.first?.element === view { direction = .older }
-            else if rows.last?.element === view { direction = .newer }
-            else { return }
-            history.prepareAdjacent(to: view, direction: direction)
+            prepareReadingEdge(view, history: history)
         }
         replace(cls, "accessibilityElementDidBecomeFocused", focus, "v@:")
 
@@ -1057,8 +1077,8 @@ private func chatListElements(_ view: UIView, listNode: Any, chat: UIViewControl
         return isChatList ? rows.map { $0.1 } as NSArray : nil
     }
     if let scroller = objectField(listNode, "scroller") as? UIScrollView {
+        // Hiding this scroller's AX subtree also hides real message bubbles on some layouts.
         scroller.isAccessibilityElement = false
-        scroller.accessibilityElementsHidden = true
     }
     if let node = chatNode(chat) {
         if let panel = objectField(node, "inputNode"), let front = nodeView(panel), isModalNode(panel), visible(front, in: chat.view) {
@@ -1073,18 +1093,13 @@ private func chatListElements(_ view: UIView, listNode: Any, chat: UIViewControl
             }.filter { visible($0, in: container) && !$0.bounds.isEmpty }
         }
     }
-    guard !rows.isEmpty else { return [] as NSArray }
-    let elements = rows.compactMap { item, row, _ -> UIView? in
-        let element = messageElement(item, row: row)
-        if element === row { return row }
-        guard let window = view.window,
-              window.convert(element.bounds, from: element).intersection(bounds).height >= min(8, element.bounds.height) else { return nil }
-        return element
-    }
     if let history = HistoryViewport(view) {
-        return addHistoryBoundaries(elements, history: history) as NSArray
+        return history.messages().map { $0.element } as NSArray
     }
-    return elements as NSArray
+    return rows.compactMap { item, row, _ -> UIView? in
+        let element = messageElement(item, row: row)
+        return element === row && (row.accessibilityLabel ?? "").isEmpty ? nil : element
+    } as NSArray
 }
 
 private func nearestNode(_ view: UIView?, matching name: String) -> NSObject? {
