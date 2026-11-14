@@ -8,6 +8,7 @@ struct AccessibleComposer: UIViewRepresentable {
     let isRecording: Bool
     let onPhotos: () -> Void
     let onFiles: () -> Void
+    let onBotCommands: () -> Void
     let onAction: () -> Void
     let onCancelRecording: () -> Void
 
@@ -21,6 +22,7 @@ struct AccessibleComposer: UIViewRepresentable {
         }
         view.onPhotos = onPhotos
         view.onFiles = onFiles
+        view.onBotCommands = onBotCommands
         view.onAction = onAction
         view.onCancelRecording = onCancelRecording
         view.configure(text: text, recording: isRecording)
@@ -57,11 +59,13 @@ final class ComposerBarView: UIView, UITextViewDelegate {
     var onTextChanged: ((String) -> Void)?
     var onPhotos: (() -> Void)?
     var onFiles: (() -> Void)?
+    var onBotCommands: (() -> Void)?
     var onAction: (() -> Void)?
     var onCancelRecording: (() -> Void)?
 
     private let photo = UIButton(type: .system)
     private let files = UIButton(type: .system)
+    private let commands = UIButton(type: .system)
     private let editor = UITextView()
     private let placeholder = UILabel()
     private let action = UIButton(type: .system)
@@ -77,14 +81,18 @@ final class ComposerBarView: UIView, UITextViewDelegate {
 
         photo.setImage(UIImage(systemName: "photo.on.rectangle"), for: .normal)
         files.setImage(UIImage(systemName: "paperclip"), for: .normal)
+        commands.setTitle("/", for: .normal)
+        commands.titleLabel?.font = .preferredFont(forTextStyle: .title2)
         cancel.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
         photo.accessibilityLabel = "傳送照片或影片"
         photo.accessibilityHint = "點兩下選擇相簿中的照片或影片"
         files.accessibilityLabel = "傳送檔案或附件"
         files.accessibilityHint = "點兩下從檔案 App 選擇附件"
+        commands.accessibilityLabel = "機器人斜線命令"
+        commands.accessibilityHint = "查看 BotFather 設定的斜線指令，選擇後填入訊息編輯框"
         cancel.accessibilityLabel = "取消錄音"
         cancel.accessibilityHint = "放棄這段語音，不會傳送"
-        for button in [photo, files, action, cancel] {
+        for button in [photo, files, commands, action, cancel] {
             button.accessibilityLanguage = "zh-TW"
             button.isAccessibilityElement = true
             button.accessibilityTraits = .button
@@ -129,7 +137,7 @@ final class ComposerBarView: UIView, UITextViewDelegate {
         row.distribution = .fill
         row.translatesAutoresizingMaskIntoConstraints = false
         row.isAccessibilityElement = false
-        for item in [photo, files, editor, action, cancel] {
+        for item in [photo, files, commands, editor, action, cancel] {
             row.addArrangedSubview(item)
         }
         addSubview(row)
@@ -142,6 +150,7 @@ final class ComposerBarView: UIView, UITextViewDelegate {
 
         photo.addTarget(self, action: #selector(openPhotos), for: .touchUpInside)
         files.addTarget(self, action: #selector(openFiles), for: .touchUpInside)
+        commands.addTarget(self, action: #selector(openCommands), for: .touchUpInside)
         action.addTarget(self, action: #selector(performAction), for: .touchUpInside)
         cancel.addTarget(self, action: #selector(cancelRecording), for: .touchUpInside)
         configure(text: "", recording: false)
@@ -174,8 +183,8 @@ final class ComposerBarView: UIView, UITextViewDelegate {
             ? "正在錄音，請使用停止並傳送或取消錄音按鈕"
             : "點兩下開始輸入聊天訊息，輸入完成後移至傳送按鈕"
         accessibilityElements = recording
-            ? [photo, files, editor, action, cancel]
-            : [photo, files, editor, action]
+            ? [photo, files, commands, editor, action, cancel]
+            : [photo, files, commands, editor, action]
     }
 
     func textViewDidChange(_ textView: UITextView) {
@@ -185,6 +194,7 @@ final class ComposerBarView: UIView, UITextViewDelegate {
 
     @objc private func openPhotos() { onPhotos?() }
     @objc private func openFiles() { onFiles?() }
+    @objc private func openCommands() { onBotCommands?() }
     @objc private func performAction() {
         // Only starting a voice note dismisses the keyboard. Sending text
         // deliberately retains focus so consecutive text messages are easy.
