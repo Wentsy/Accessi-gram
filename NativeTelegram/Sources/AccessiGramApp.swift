@@ -181,6 +181,9 @@ struct ConversationsScreen: View {
                         }
                         Button("標記未讀") { service.markUnread(chatID: chat.id) }
                     }
+                    .onAppear {
+                        if searchText.isEmpty && chat.id == service.chats.last?.id { service.loadMoreChats() }
+                    }
                     .contextMenu {
                         Button("標記未讀") { service.markUnread(chatID: chat.id) }
                         Button(chat.isPinned ? "取消置頂" : "置頂") {
