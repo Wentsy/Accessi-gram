@@ -49,7 +49,7 @@ final class ComposerBarView: UIView, UITextViewDelegate {
     }
 
     func insertBotCommand(_ command: String) {
-        editor.text = command + " "
+        editor.text = command.isEmpty ? "/" : command + " "
         placeholder.isHidden = true
         onTextChanged?(editor.text)
         editor.becomeFirstResponder()
