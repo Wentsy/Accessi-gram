@@ -20,7 +20,7 @@ struct AccessibleDocumentPicker: UIViewControllerRepresentable {
         picker.allowsMultipleSelection = true
         picker.delegate = context.coordinator
         picker.modalPresentationStyle = .formSheet
-        picker.accessibilityLanguage = "zh-TW"
+        picker.view.accessibilityLanguage = "zh-TW"
         return picker
     }
 
