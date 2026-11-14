@@ -8,6 +8,18 @@ enum GoogleTranslate {
 
     /// Free Google Translate website endpoint. Unofficial and subject to rate limits.
     static func translate(_ text: String) async throws -> String {
+        var remaining = text[...]
+        var result = ""
+        while !remaining.isEmpty {
+            let end = remaining.index(remaining.startIndex, offsetBy: min(1200, remaining.count))
+            let part = String(remaining[..<end])
+            result += try await translatePart(part)
+            remaining = remaining[end...]
+        }
+        return result
+    }
+
+    private static func translatePart(_ text: String) async throws -> String {
         var components = URLComponents(string: "https://translate.googleapis.com/translate_a/t")!
         components.queryItems = [
             URLQueryItem(name: "client", value: "dict-chrome-ex"),
