@@ -133,8 +133,7 @@ struct MediaViewer: View {
                             Text("無法開啟照片")
                         }
                     case "video":
-                        VideoPlayer(player: AVPlayer(url: localURL))
-                            .accessibilityLabel(message.body)
+                        AccessibleVideoPlayer(url: localURL)
                     case "voice", "audio":
                         AccessibleAudioPlayback(
                             description: message.body,
@@ -264,4 +263,20 @@ final class NativeAudioPlaybackView: UIView {
     }
 
     @objc private func toggle() { onToggle?() }
+}
+
+
+/// AVKit owns its built-in playback controls and their accessibility labels.
+struct AccessibleVideoPlayer: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = AVPlayer(url: url)
+        controller.showsPlaybackControls = true
+        controller.view.accessibilityLanguage = "zh-TW"
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {}
 }
