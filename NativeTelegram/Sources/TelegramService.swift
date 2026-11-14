@@ -291,34 +291,39 @@ final class TelegramService: ObservableObject {
     func loadChats() {
         guard authStage == .ready, !loadingChats else { return }
         loadingChats = true
+        moreChatsAvailable = true
         chatSyncStatus = "正在同步 Telegram 對話與群組"
+        chatListLimit = max(100, chatsByID.count)
         let list: JSONObject = ["@type": archived ? "chatListArchive" : "chatListMain"]
+        syncNextChatPage(in: list)
+    }
 
-        // loadChats starts TDLib's normal cloud/cache synchronization.
-        // Its result may say "Not enough chats"; getChats still returns the cache.
-        request("loadChats", ["chat_list": list, "limit": 100]) { [weak self] _ in
+    // TDLib loads an amount selected by the library. One loadChats call does
+    // not mean the full chat history is available; keep fetching until 404.
+    private func syncNextChatPage(in list: JSONObject) {
+        request("loadChats", ["chat_list": list, "limit": 100]) { [weak self] outcome in
             guard let self else { return }
-            self.request("getChats", ["chat_list": list, "limit": self.chatListLimit]) { [weak self] result in
+            self.request("getChats", ["chat_list": list, "limit": self.chatListLimit]) { [weak self] snapshot in
                 guard let self else { return }
-                self.loadingChats = false
                 self.hasLoadedChatList = true
-                let ids = result.intIDs("chat_ids")
-                self.moreChatsAvailable = ids.count >= self.chatListLimit
-                if result.text("@type") == "error" {
-                    self.chatSyncStatus = "同步暫時失敗，可按重新同步"
-                    self.errorMessage = result.text("message")
-                    return
+                for id in snapshot.intIDs("chat_ids") where self.chatsByID[id] == nil {
+                    self.request("getChat", ["chat_id": id]) { [weak self] chat in
+                        if chat.text("@type") == "chat" { self?.addChat(chat) }
+                    }
                 }
-                if ids.isEmpty {
-                    self.chatSyncStatus = "尚未取得對話，正在等候 Telegram 更新"
-                    return
-                }
-                self.chatSyncStatus = "正在顯示 \(ids.count) 個對話"
-                // Request cached chat objects; TDLib will continue delivering
-                // updateNewChat/updateChatPosition while syncing the account.
-                for id in ids {
-                    self.request("getChat", ["chat_id": id]) { [weak self] raw in
-                        if raw.text("@type") == "chat" { self?.addChat(raw) }
+
+                if outcome.text("@type") == "ok" {
+                    self.chatListLimit += 100
+                    self.syncNextChatPage(in: list)
+                } else {
+                    self.loadingChats = false
+                    let finished = outcome.number("code") == 404
+                    self.moreChatsAvailable = !finished
+                    self.chatSyncStatus = finished
+                        ? "聊天同步完成，已載入 \(self.chatsByID.count) 個對話"
+                        : "同步暫時中斷，可按重新同步"
+                    if !finished && outcome.text("@type") == "error" {
+                        self.errorMessage = outcome.text("message")
                     }
                 }
             }
@@ -326,8 +331,9 @@ final class TelegramService: ObservableObject {
     }
 
     func loadMoreChats() {
+        // Initial sync already walks every chat page. While it runs, UIKit
+        // can browse the rows received so far without firing duplicate loads.
         guard !loadingChats && moreChatsAvailable else { return }
-        chatListLimit += 100
         loadChats()
     }
 
