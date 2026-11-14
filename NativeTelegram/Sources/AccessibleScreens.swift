@@ -272,14 +272,6 @@ final class AccessibleSettingsController: UITableViewController {
 
         // Update visible status in place rather than reloading a whole section
         // and displacing a VoiceOver cursor in the middle of the page.
-        service.$shareSessionStatus.receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                let path = IndexPath(row: 1, section: 2)
-                if let cell = self?.tableView.cellForRow(at: path) as? AccessibleSettingCell {
-                    cell.display(title: "重新建立分享登入", detail: status, button: true)
-                }
-            }
-            .store(in: &subscriptions)
         service.$chatSyncStatus.receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
@@ -295,7 +287,7 @@ final class AccessibleSettingsController: UITableViewController {
     override func numberOfSections(in tableView: UITableView) -> Int { 4 }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        section == 2 ? 2 : 1
+        1
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
@@ -313,11 +305,7 @@ final class AccessibleSettingsController: UITableViewController {
             cell.display(title: "使用指南", detail: "閱讀旁白翻頁、訊息操作、語音和翻譯說明",
                          button: true)
         case 2:
-            if path.row == 0 {
-                cell.display(title: "重新同步對話", detail: service.chatSyncStatus, button: true)
-            } else {
-                cell.display(title: "重新建立分享登入", detail: service.shareSessionStatus, button: true)
-            }
+            cell.display(title: "重新同步對話", detail: service.chatSyncStatus, button: true)
         default:
             cell.display(title: "登出 Telegram", detail: "須再次確認才會登出", button: true)
         }
@@ -339,15 +327,9 @@ final class AccessibleSettingsController: UITableViewController {
         case 1:
             navigationController?.pushViewController(AccessibleHelpController(style: .insetGrouped), animated: true)
         case 2:
-            if path.row == 0 {
-                service.loadChats()
-                UIAccessibility.post(notification: .announcement,
-                                     argument: "已要求重新同步 Telegram 對話")
-            } else {
-                service.prepareShareSession()
-                UIAccessibility.post(notification: .announcement,
-                                     argument: "正在重新建立跨 App 分享登入資料")
-            }
+            service.loadChats()
+            UIAccessibility.post(notification: .announcement,
+                                 argument: "已要求重新同步 Telegram 對話")
         default:
             let alert = UIAlertController(title: "確認登出",
                                           message: "登出此裝置上的 Telegram 帳號？",
