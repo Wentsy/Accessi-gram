@@ -73,3 +73,17 @@ TELEGRAM_API_ID="$MY_TG_API_ID" TELEGRAM_API_HASH="$MY_TG_API_HASH" bash scripts
 ```
 
 注意：只要把 API 金鑰嵌進 IPA，就無法防止擁有 IPA 的人提取；這是免輸入換取的取捨。若實際金鑰先前已提交到公開 repo，請評估撤銷／更換並從此避免再次提交。
+
+## 2026-11-14：訊息輸入列與錄音的 VoiceOver 修正
+
+使用者回報聊天列表已可朗讀，但聊天室內編輯框、錄音按鈕仍無法直接左右滑朗讀。本次改以原生 UIKit 元件處理：
+
+- AccessibleComposer.swift：用 UITextView 讓 VoiceOver 正常進入文字編輯、讀取中文輸入；相簿、檔案、發送、錄音、停止並傳送、取消錄音皆有 zh-TW 標籤及提示，外層容器不再產生空白焦點。
+- 錄音按鈕固定位置，狀態在「開始錄製語音訊息」和「停止錄音並傳送語音訊息」之間切換；錄音中另有「取消錄音」。不更動 TDLib 資料庫。
+- 聊天回覆提示改為 AccessibleReplyBanner，內容和取消回覆各一個焦點。
+- 轉寄列表改為 AccessibleForwardSheet 原生 UITableView，選擇的聊天名稱可直接被旁白讀到。
+- 接收照片、音訊播放改成明確標籤的 UIKit 控制項，影片播放使用原生 AVKit。
+- 設定頁移除不可調整的朗讀順序、翻頁與翻譯描述，改成 AccessibleHelp.swift 提供「使用指南」。設定只保留「使用指南」、「重新同步對話」、「登出 Telegram」這三個真的有動作的選項。
+- 已移除沒有使用的舊 SwiftUI 聊天、設定介面，也清掉先前硬編入公開原始碼的 API 預設值。免輸入 API 請沿用 build.sh 使用私有環境變數注入 Info.plist。**不應再把真實 API Hash 提交到公開倉庫。**
+
+給 OC：拉取 rewrite/native-tdlib-voiceover 最新提交後編譯，使用與原版相同的 Bundle ID、Keychain 權限和 TDLib 資料庫路徑覆蓋安裝。這次未在此環境執行 Xcode／真機測試。更新後聊天輸入列從左至右應能讀到：「傳送照片或影片」、「傳送檔案或附件」、「訊息編輯框」、「開始錄製語音訊息」或「傳送文字訊息」。錄音時應有「停止錄音並傳送語音訊息」及「取消錄音」。
