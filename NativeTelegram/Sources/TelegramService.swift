@@ -42,6 +42,7 @@ final class TelegramService: ObservableObject {
     @Published var archived = false
     @Published var loadingChats = false
     @Published var passwordHint = ""
+    @Published var contacts: [(id: Int64, name: String)] = []
 
     private var clientID: Int32 = 0
     private var apiID = 0
@@ -263,6 +264,49 @@ final class TelegramService: ObservableObject {
         chats = chatsByID.values
             .filter { $0.isArchived == archived && $0.order > 0 }
             .sorted { $0.order == $1.order ? $0.id > $1.id : $0.order > $1.order }
+    }
+
+
+    func loadContacts() {
+        request("getContacts") { [weak self] response in
+            let ids = (response["user_ids"] as? [NSNumber] ?? []).map(\.int64Value)
+            for userID in ids {
+                self?.request("getUser", ["user_id": userID]) { [weak self] user in
+                    guard let self, user.text("@type") == "user" else { return }
+                    self.storeUser(user)
+                    let name = self.users[userID] ?? "使用者 \(userID)"
+                    if !self.contacts.contains(where: { $0.id == userID }) {
+                        self.contacts.append((id: userID, name: name))
+                        self.contacts.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                    }
+                }
+            }
+        }
+    }
+
+    func createPrivateChat(userID: Int64, completion: @escaping (Int64?) -> Void) {
+        request("createPrivateChat", ["user_id": userID, "force": false]) { [weak self] response in
+            guard response.text("@type") == "chat" else {
+                self?.errorMessage = response.text("message")
+                completion(nil)
+                return
+            }
+            self?.addChat(response)
+            completion(response.number("id"))
+        }
+    }
+
+    func findUsername(_ input: String, completion: @escaping (Int64?) -> Void) {
+        let username = input.trimmingCharacters(in: CharacterSet(charactersIn: "@ "))
+        request("searchPublicChat", ["username": username]) { [weak self] response in
+            guard response.text("@type") == "chat" else {
+                self?.errorMessage = response.text("message")
+                completion(nil)
+                return
+            }
+            self?.addChat(response)
+            completion(response.number("id"))
+        }
     }
 
     func chatTitle(_ id: Int64) -> String { chatsByID[id]?.title ?? "聊天室" }
