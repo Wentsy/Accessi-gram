@@ -136,38 +136,57 @@ struct ChatScreen: View {
             }
         }
         .photosPicker(isPresented: $showPhotos, selection: $selectedPhoto, matching: .any(of: [.images, .videos]))
-        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) {
-            result in
-            guard case let .success(urls) = result else { return }
-            for url in urls {
-                let accessing = url.startAccessingSecurityScopedResource()
-                let local = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
-                try? FileManager.default.copyItem(at: url, to: local)
-                if accessing { url.stopAccessingSecurityScopedResource() }
-                let type = UTType(filenameExtension: local.pathExtension)
-                let kind: String
-                if type?.conforms(to: .image) == true { kind = "photo" }
-                else if type?.conforms(to: .movie) == true { kind = "video" }
-                else { kind = "document" }
-                service.sendMedia(chatID: chatID, fileURL: local, kind: kind)
+        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { selection in
+            switch selection {
+            case .success(let urls):
+                for url in urls {
+                    Task {
+                        do {
+                            let local = try await AttachmentPreparation.copyFromFiles(url)
+                            let type = UTType(filenameExtension: local.pathExtension)
+                            // Files picker means "send file", preserving the
+                            // original name and type instead of coercing it.
+                            let kind = type?.conforms(to: .movie) == true ? "video" :
+                                       type?.conforms(to: .image) == true ? "photo" : "document"
+                            if kind == "video" {
+                                let converted = try await AttachmentPreparation.videoForTelegram(local)
+                                service.sendMedia(chatID: chatID, fileURL: converted, kind: "video")
+                            } else {
+                                service.sendMedia(chatID: chatID, fileURL: local, kind: kind)
+                            }
+                        } catch {
+                            service.errorMessage = "無法傳送檔案 \(url.lastPathComponent)：\(error.localizedDescription)"
+                        }
+                    }
+                }
+            case .failure(let error):
+                service.errorMessage = "無法讀取所選附件：\(error.localizedDescription)"
             }
         }
-        .onChange(of: selectedPhoto) { selected in
-            guard let selected else { return }
+        .onChange(of: selectedPhoto) { selection in
+            guard let selection else { return }
             Task {
-                let isMovie = selected.supportedContentTypes.contains { $0.conforms(to: .movie) }
-                if isMovie {
-                    if let movie = try? await selected.loadTransferable(type: ImportedMovie.self) {
-                        service.sendMedia(chatID: chatID, fileURL: movie.url, kind: "video")
+                defer { selectedPhoto = nil }
+                do {
+                    let isMovie = selection.supportedContentTypes.contains {
+                        $0.conforms(to: .movie)
                     }
-                } else if let data = try? await selected.loadTransferable(type: Data.self) {
-                    let url = FileManager.default.temporaryDirectory
-                        .appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
-                    try? data.write(to: url)
-                    service.sendMedia(chatID: chatID, fileURL: url, kind: "photo")
+                    if isMovie {
+                        guard let movie = try await selection.loadTransferable(type: ImportedMovie.self) else {
+                            throw AttachmentPreparation.Failure.unreadableFile
+                        }
+                        let mp4 = try await AttachmentPreparation.videoForTelegram(movie.url)
+                        service.sendMedia(chatID: chatID, fileURL: mp4, kind: "video")
+                    } else {
+                        guard let data = try await selection.loadTransferable(type: Data.self) else {
+                            throw AttachmentPreparation.Failure.unreadableFile
+                        }
+                        let jpeg = try AttachmentPreparation.photoFromPicker(data)
+                        service.sendMedia(chatID: chatID, fileURL: jpeg, kind: "photo")
+                    }
+                } catch {
+                    service.errorMessage = "無法傳送選取的照片或影片：\(error.localizedDescription)"
                 }
-                selectedPhoto = nil
             }
         }
     }
@@ -182,9 +201,8 @@ struct ChatScreen: View {
                 onAction: {
                     if voice.isRecording {
                         if let recording = voice.stop() {
-                            service.sendMedia(chatID: chatID, fileURL: recording, kind: "voice")
-                            UIAccessibility.post(notification: .announcement,
-                                                 argument: "已提交語音訊息，正在傳送")
+                            service.sendMedia(chatID: chatID, fileURL: recording,
+                                              kind: "voice", duration: voice.lastDuration)
                         }
                     } else if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         sendDraft()
