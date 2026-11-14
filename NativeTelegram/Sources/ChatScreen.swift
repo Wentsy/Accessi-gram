@@ -63,61 +63,41 @@ struct ChatScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { service.open(chatID) }
         .onDisappear { service.close(chatID) }
-        .confirmationDialog("訊息操作", isPresented: $showingMessageMenu, titleVisibility: .visible) {
+        .sheet(isPresented: $showingMessageMenu) {
             if let message = menuMessage {
-                Button("翻譯成繁體中文並朗讀") { service.translate(message) }
-                Button("回覆") { thread.replyTo = message }
-                Button("複製訊息") {
-                    UIPasteboard.general.string = message.body
-                    UIAccessibility.post(notification: .announcement, argument: "訊息已複製")
+                AccessibleChoiceSheet(title: "訊息操作", choices: messageMenuChoices(message)) { id in
+                    performMessageAction(id, for: message)
                 }
-                if message.fileID > 0 {
-                    Button("開啟附件") { mediaMessage = message }
-                }
-                if !message.buttons.isEmpty || !message.keyboardButtons.isEmpty {
-                    Button("展開機器人選單") {
-                        botMessage = message
-                        showingBotMenu = true
-                    }
-                }
-                Button("表情回應") { showingReactions = true }
-                Button("轉寄") {
-                    forwardMessage = message
-                    showingForward = true
-                }
-                if message.outgoing {
-                    if message.fileKind.isEmpty {
-                        Button("編輯") {
-                            editedText = message.body
-                            showingEdit = true
-                        }
-                    }
-                    Button("刪除訊息", role: .destructive) {
-                        service.delete(message)
-                    }
-                }
+                .presentationDetents([.medium, .large])
             }
         }
-        .confirmationDialog("機器人互動選單", isPresented: $showingBotMenu, titleVisibility: .visible) {
-            if let message = botMessage {
-                ForEach(message.buttons + message.keyboardButtons) { button in
-                    Button(button.title) {
+        .sheet(isPresented: $showingBotMenu) {
+            if let message = botMessage ?? keyboardMessage {
+                AccessibleChoiceSheet(
+                    title: "機器人互動選單",
+                    choices: (message.buttons + message.keyboardButtons).map {
+                        AccessibleMenuChoice($0.id, $0.title)
+                    }
+                ) { id in
+                    if let button = (message.buttons + message.keyboardButtons)
+                        .first(where: { $0.id == id }) {
                         service.botAction(button, message: message)
                     }
                 }
-            } else if let message = keyboardMessage {
-                ForEach(message.keyboardButtons) { button in
-                    Button(button.title) {
-                        service.botAction(button, message: message)
-                    }
-                }
+                .presentationDetents([.medium, .large])
             }
         }
-        .confirmationDialog("選擇表情回應", isPresented: $showingReactions, titleVisibility: .visible) {
+        .sheet(isPresented: $showingReactions) {
             if let message = menuMessage {
-                ForEach(["👍", "❤️", "😂", "🎉", "😮", "🙏"], id: \.self) { emoji in
-                    Button(emoji) { service.react(message, emoji: emoji) }
+                AccessibleChoiceSheet(
+                    title: "選擇表情回應",
+                    choices: ["👍", "❤️", "😂", "🎉", "😮", "🙏"].map {
+                        AccessibleMenuChoice($0, "回應 \($0)")
+                    }
+                ) { emoji in
+                    service.react(message, emoji: emoji)
                 }
+                .presentationDetents([.medium])
             }
         }
         .alert("編輯訊息", isPresented: $showingEdit) {
@@ -180,6 +160,60 @@ struct ChatScreen: View {
                     service.errorMessage = "無法傳送選取的照片或影片：\(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    private func messageMenuChoices(_ message: TelegramMessage) -> [AccessibleMenuChoice] {
+        var choices: [AccessibleMenuChoice] = [
+            .init("translate", "翻譯成繁體中文並朗讀"),
+            .init("reply", "回覆訊息"),
+            .init("copy", "複製訊息"),
+        ]
+        if message.fileID > 0 {
+            choices.append(.init("open", message.fileKind == "voice" || message.fileKind == "audio"
+                                 ? "播放語音訊息" : "開啟附件"))
+        }
+        if !message.buttons.isEmpty || !message.keyboardButtons.isEmpty {
+            choices.append(.init("bot", "展開機器人互動選單"))
+        }
+        choices += [.init("react", "表情回應"), .init("forward", "轉寄訊息")]
+        if message.outgoing {
+            if message.fileKind.isEmpty { choices.append(.init("edit", "編輯訊息")) }
+            choices.append(.init("delete", "刪除訊息"))
+        }
+        return choices
+    }
+
+    private func performMessageAction(_ id: String, for message: TelegramMessage) {
+        switch id {
+        case "translate":
+            service.translate(message)
+        case "reply":
+            thread.replyTo = message
+        case "copy":
+            UIPasteboard.general.string = message.body
+            UIAccessibility.post(notification: .announcement, argument: "訊息已複製")
+        case "open", "bot", "react", "forward", "edit":
+            // Present the next modal only after the menu finishes dismissing.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                switch id {
+                case "open": mediaMessage = message
+                case "bot":
+                    botMessage = message
+                    showingBotMenu = true
+                case "react": showingReactions = true
+                case "forward":
+                    forwardMessage = message
+                    showingForward = true
+                case "edit":
+                    editedText = message.body
+                    showingEdit = true
+                default: break
+                }
+            }
+        case "delete":
+            service.delete(message)
+        default: break
         }
     }
 
