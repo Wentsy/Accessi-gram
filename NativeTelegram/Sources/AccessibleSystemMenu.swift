@@ -1,5 +1,17 @@
 import UIKit
 
+struct AccessibleMenuChoice: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+
+    init(_ id: String, _ title: String, _ detail: String = "") {
+        self.id = id
+        self.title = title
+        self.detail = detail
+    }
+}
+
 /// Native UIKit action sheets and alerts use the iOS accessibility tree
 /// directly. No SwiftUI hosting overlays, hidden table views or nested
 /// presentation controllers can swallow VoiceOver focus.
