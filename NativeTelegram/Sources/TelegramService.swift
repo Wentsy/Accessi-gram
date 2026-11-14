@@ -396,7 +396,6 @@ final class TelegramService: ObservableObject {
                     if !self.contacts.contains(where: { $0.id == userID }) {
                         self.contacts.append(TelegramContact(id: userID, name: name))
                         self.contacts.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                        self.publishShareRecipients()
                     }
                 }
             }
