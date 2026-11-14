@@ -62,7 +62,7 @@ bash scripts/build.sh
 1. **聊天室被錯誤隱藏**：TDLib JSON 的 64 位元欄位（特別是 `chatPosition.order`）可能是十進位字串；舊的 `JSONObject.number` 僅接受 NSNumber，令排序為 0 而隱藏全部聊天。現統一接受 NSNumber / decimal String，包含 chat ID、message ID、排序等值。
 2. **歷史清單同步不完整**：原先 `loadChats` 只叫一次，又在 `getChats` 只讀當前少數聊天室。現會依 TDLib 官方機制逐批 `loadChats`，直到回傳 404（代表已載完），並用 `getChats` 補充快取與 `updateNewChat` 等事件。原帳號聊天不需重新匯入，也不主動刪除已儲存資料。
 3. **VoiceOver 只有工具列能朗讀**：不再用 SwiftUI 的 List/Form 呈現登入後主要頁。新增 `AccessibleScreens.swift`：原生 UIKit 聊天、封存、設定、聯絡人清單，所有表格列有真正的 `accessibilityLabel`、`accessibilityLanguage = "zh-TW"`、適當 traits。聊天訊息 `MessageRow` 仍維持一則一個焦點，內部 UILabel 不再多一個焦點。
-4. **每次開啟「Unexpected setTdlibParameters」**：TDLib 初始狀態推送和手動 `getAuthorizationState` 回覆可能重覆。設置 `parametersRequested`，只有在 `authorizationStateWaitTdlibParameters` 且尚未傳過參數時才呼叫 `setTdlibParameters`。重複回覆的 race 不再彈出無害錯誤。只要維持相同 Bundle ID / Keychain 權限 / TDLib database 路徑，更新不應主動登出。
+4. **每次開啟「Unexpected setTdlibParameters」**：TDLib 初始狀態推送和手動 `getAuthorizationState` 回覆可能重覆。設置 `parametersRequested`，只有在 `authorizationStateWaitTdlibParameters` 且尚未傳過參數時才呼叫 `setTdlibParameters`。**若 OC 之前另外寫入一段直接呼叫 `setTdlibParameters` 的程式，請刪除第二個呼叫，預填 API 不代表要再次初始化。**重複回覆的 race 不再彈出無害錯誤。只要維持相同 Bundle ID / Keychain 權限 / TDLib database 路徑，更新不應主動登出。
 5. **API 可直接編入未簽名 IPA**：新的 `scripts/build.sh` 可使用 `TELEGRAM_API_ID` 與 `TELEGRAM_API_HASH` 環境變數。專案將值注入 `Info.plist`；App 首次讀取後存入 iOS Keychain，日後無需反覆輸入。若沒有環境變數，仍可在登入頁輸入一次。請不要把真實金鑰放回公開 Git 歷史。
 
 **OC 建置方式（在本機私有環境設定變數，勿把數值貼到公開倉庫）：**
