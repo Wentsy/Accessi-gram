@@ -148,6 +148,28 @@ struct ChatScreen: View {
         }
     }
 
+    private func showSlashCommandMenu() {
+        service.botSlashCommands(chatID: chatID) { commands in
+            if commands.isEmpty {
+                AccessibleSystemMenu.present(
+                    title: "此聊天沒有已設定的機器人斜線命令",
+                    choices: [AccessibleMenuChoice("manual", "手動輸入 / 指令")]
+                ) { _ in
+                    ComposerBarView.active?.insertBotCommand("")
+                }
+                return
+            }
+            AccessibleSystemMenu.present(
+                title: "機器人斜線命令",
+                choices: commands.map {
+                    AccessibleMenuChoice($0.command, "/" + $0.command, $0.description)
+                }
+            ) { selected in
+                ComposerBarView.active?.insertBotCommand("/" + selected)
+            }
+        }
+    }
+
     private func showBotMenu(_ message: TelegramMessage) {
         let items = message.buttons + message.keyboardButtons
         AccessibleSystemMenu.present(title: "機器人互動選單",
@@ -208,6 +230,7 @@ struct ChatScreen: View {
                 isRecording: voice.isRecording,
                 onPhotos: { showPhotos = true },
                 onFiles: { showFiles = true },
+                onBotCommands: { showSlashCommandMenu() },
                 onAction: {
                     if voice.isRecording {
                         if let recording = voice.stop() {
