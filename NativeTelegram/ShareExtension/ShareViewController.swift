@@ -26,7 +26,7 @@ final class ShareViewController: SLComposeServiceViewController {
         item.value = recipient?.title ?? "點兩下選擇聯絡人、群組或頻道"
         item.tapHandler = { [weak self] in
             guard let self else { return }
-            self.pushConfigurationViewController(ShareRecipientPicker { [weak self] chosen in
+            self.pushConfigurationViewController(ShareRecipientPicker(sender: self.directSender) { [weak self] chosen in
                 self?.recipient = chosen
                 self?.reloadConfigurationItems()
                 self?.popConfigurationViewController()
@@ -170,45 +170,71 @@ final class ShareViewController: SLComposeServiceViewController {
 
 /// One VoiceOver element per recipient; search and contact selection work
 /// without launching the main application or reaching into its TDLib database.
+@MainActor
 final class ShareRecipientPicker: UITableViewController, UISearchResultsUpdating {
     private let onSelect: (ShareRecipient) -> Void
-    private let all = ShareMailbox.recipients()
+    private let sender: ExtensionTelegramSender
+    private var all: [ShareRecipient] = []
     private let search = UISearchController(searchResultsController: nil)
     private var filtered: [ShareRecipient] = []
+    private let status = UILabel()
 
-    init(onSelect: @escaping (ShareRecipient) -> Void) {
+    init(sender: ExtensionTelegramSender, onSelect: @escaping (ShareRecipient) -> Void) {
+        self.sender = sender
         self.onSelect = onSelect
         super.init(style: .plain)
     }
 
-    required init?(coder: NSCoder) { fatalError("Use init(onSelect:)") }
+    required init?(coder: NSCoder) { fatalError("Use init(sender:onSelect:)") }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "選擇聯絡人或對話"
-        filtered = all
-        search.searchBar.placeholder = "搜尋聯絡人或群組"
-        search.searchBar.accessibilityLanguage = "zh-TW"
+        title = "最近聊天"
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "recipient")
+        tableView.rowHeight = 55
+        tableView.accessibilityLanguage = "zh-TW"
+        search.searchBar.placeholder = "搜尋最近的私聊、群組或頻道"
         search.searchResultsUpdater = self
         search.obscuresBackgroundDuringPresentation = false
         navigationItem.searchController = search
         definesPresentationContext = true
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "recipient")
-        if all.isEmpty {
-            let label = UILabel()
-            label.text = "尚未同步接收對象。請先開啟 Accessi Gram，讓聊天列表與聯絡人完成同步。"
-            label.numberOfLines = 0
-            label.textAlignment = .center
-            label.isAccessibilityElement = true
-            label.accessibilityLabel = label.text
-            tableView.backgroundView = label
+
+        status.numberOfLines = 0
+        status.textAlignment = .center
+        status.text = "正在從 Telegram 取得最近聊天"
+        status.accessibilityLabel = status.text
+        status.accessibilityLanguage = "zh-TW"
+        status.isAccessibilityElement = true
+
+        all = ShareMailbox.recipients()
+        refresh()
+        // Always query Telegram, even if the main app never populated an App
+        // Group snapshot or iOS only recently installed the share extension.
+        Task { @MainActor in
+            do {
+                let latest = try await sender.recentRecipients()
+                if !latest.isEmpty { all = latest }
+                status.text = all.isEmpty ? "目前沒有可選擇的最近聊天" : ""
+                refresh()
+            } catch {
+                status.text = all.isEmpty
+                    ? "無法讀取 Telegram 最近聊天：\(error.localizedDescription)"
+                    : "最近聊天暫時無法更新，顯示上次取得的對話"
+                status.accessibilityLabel = status.text
+                refresh()
+            }
         }
     }
 
     func updateSearchResults(for searchController: UISearchController) {
-        let query = searchController.searchBar.text ?? ""
+        refresh()
+    }
+
+    private func refresh() {
+        let query = search.searchBar.text ?? ""
         filtered = query.isEmpty ? all :
             all.filter { $0.title.localizedCaseInsensitiveContains(query) }
+        tableView.backgroundView = filtered.isEmpty ? status : nil
         tableView.reloadData()
     }
 
@@ -225,9 +251,19 @@ final class ShareRecipientPicker: UITableViewController, UISearchResultsUpdating
         cell.accessoryType = .disclosureIndicator
         cell.isAccessibilityElement = true
         cell.accessibilityLanguage = "zh-TW"
-        cell.accessibilityLabel = "傳送給 \(entry.title)"
-        cell.accessibilityTraits = .button
+        cell.accessibilityLabel = "分享給 \(entry.title)"
+        cell.accessibilityHint = "點兩下選擇此聊天室"
+        cell.accessibilityTraits = [.button]
         return cell
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if let first = tableView.cellForRow(at: IndexPath(row: 0, section: 0)) {
+            UIAccessibility.post(notification: .screenChanged, argument: first)
+        } else {
+            UIAccessibility.post(notification: .screenChanged, argument: status)
+        }
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt path: IndexPath) {
