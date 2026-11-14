@@ -231,9 +231,12 @@ final class MessageRow: UITableViewCell {
         content.text = "\(message.sender)\n\(message.body)\n\(TelegramMessage.timestamp.string(from: message.date))"
         accessibilityLabel = message.spoken
         accessibilityLanguage = "zh-TW"
-        accessibilityHint = "上下滑動選擇翻譯、回覆或其他操作，點兩下開啟訊息選單"
+        accessibilityHint = (message.fileKind == "voice" || message.fileKind == "audio")
+            ? "點兩下播放語音訊息；上下滑動可選擇其他操作"
+            : "上下滑動選擇翻譯、回覆或其他操作，點兩下開啟訊息選單"
         self.onFocus = onFocus
-        self.onActivate = onActivate
+        self.onActivate = (message.fileKind == "voice" || message.fileKind == "audio")
+            ? onMedia : onActivate
         var actions = [
             UIAccessibilityCustomAction(name: "翻譯成繁體中文") { _ in onTranslate(); return true },
             UIAccessibilityCustomAction(name: "回覆") { _ in onReply(); return true },
@@ -245,7 +248,9 @@ final class MessageRow: UITableViewCell {
             UIAccessibilityCustomAction(name: "更多操作") { _ in onActivate(); return true }
         ]
         if message.fileID > 0 {
-            actions.append(UIAccessibilityCustomAction(name: "開啟附件") { _ in onMedia(); return true })
+            let name = message.fileKind == "voice" || message.fileKind == "audio"
+                ? "播放語音訊息" : "開啟附件"
+            actions.append(UIAccessibilityCustomAction(name: name) { _ in onMedia(); return true })
         }
         if !message.buttons.isEmpty || !message.keyboardButtons.isEmpty {
             actions.append(UIAccessibilityCustomAction(name: "展開機器人選單") { _ in onBot(); return true })
