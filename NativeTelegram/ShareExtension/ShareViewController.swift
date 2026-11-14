@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 /// app. The system hosts a caption editor and contact/group picker right here.
 final class ShareViewController: SLComposeServiceViewController {
     private var recipient: ShareRecipient?
+    private let directSender = ExtensionTelegramSender()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -119,34 +120,51 @@ final class ShareViewController: SLComposeServiceViewController {
         }
 
         group.notify(queue: .main) {
+            if !errors.isEmpty {
+                self.showFailure("讀取分享內容失敗：" + errors.joined(separator: "；"))
+                return
+            }
             let caption = ([self.contentText ?? ""] + texts)
                 .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 .joined(separator: "\n")
             let pending = PendingShare(
                 id: draftID, target: recipient, caption: caption, attachments: attachments
             )
+            self.sendDirectly(pending)
+        }
+    }
 
+    private func sendDirectly(_ draft: PendingShare) {
+        title = "正在傳送給 \(draft.target.title)"
+        navigationItem.prompt = "正在連線 Telegram 並上傳分享內容"
+        UIAccessibility.post(notification: .announcement,
+                             argument: "正在傳送給 \(draft.target.title)，請保持分享視窗開啟")
+        Task { @MainActor in
             do {
-                try ShareMailbox.enqueue(pending)
-                let alert = UIAlertController(
-                    title: "分享已準備好",
-                    message: "已選擇 \(recipient.title)。請開啟 Accessi Gram，程式會自動送出這次分享。",
-                    preferredStyle: .alert
-                )
-                alert.addAction(UIAlertAction(title: "完成", style: .default) { _ in
-                    self.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
-                })
-                self.present(alert, animated: true)
+                try await directSender.send(draft) { [weak self] status in
+                    self?.navigationItem.prompt = status
+                }
+                ShareMailbox.discardFiles(for: draft)
+                navigationItem.prompt = nil
+                UIAccessibility.post(notification: .announcement, argument: "Telegram 分享成功")
+                extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
             } catch {
-                let alert = UIAlertController(
-                    title: "無法準備分享",
-                    message: error.localizedDescription + errors.joined(separator: "\n"),
-                    preferredStyle: .alert
-                )
-                alert.addAction(UIAlertAction(title: "確定", style: .default))
-                self.present(alert, animated: true)
+                navigationItem.prompt = nil
+                showFailure(error.localizedDescription) { [weak self] in
+                    self?.sendDirectly(draft)
+                }
             }
         }
+    }
+
+    private func showFailure(_ message: String, retry: (() -> Void)? = nil) {
+        let alert = UIAlertController(title: "分享未送出", message: message,
+                                      preferredStyle: .alert)
+        if let retry {
+            alert.addAction(UIAlertAction(title: "重新傳送", style: .default) { _ in retry() })
+        }
+        alert.addAction(UIAlertAction(title: "返回修改", style: .cancel))
+        present(alert, animated: true)
     }
 }
 
