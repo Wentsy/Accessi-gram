@@ -19,6 +19,30 @@ enum KeychainAPI {
                     kSecValueData: data,
                     kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly] as CFDictionary, nil)
     }
+    static func databaseKey() -> String {
+        let keyAccount = "org.accessigram.native.database"
+        var found: CFTypeRef?
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrAccount: keyAccount,
+            kSecMatchLimit: kSecMatchLimitOne,
+            kSecReturnData: true
+        ]
+        if SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess {
+            return (found as! Data).base64EncodedString()
+        }
+        var bytes = [UInt8](repeating: 0, count: 32)
+        SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let data = Data(bytes)
+        SecItemAdd([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrAccount: keyAccount,
+            kSecValueData: data,
+            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ] as CFDictionary, nil)
+        return data.base64EncodedString()
+    }
+
     static func load() -> (Int, String)? {
         var result: CFTypeRef?
         let status = SecItemCopyMatching([kSecClass: kSecClassGenericPassword,
@@ -189,7 +213,7 @@ final class TelegramService: ObservableObject {
                 "api_id": apiID, "api_hash": apiHash,
                 "database_directory": root.appendingPathComponent("tdlib").path,
                 "files_directory": root.appendingPathComponent("files").path,
-                "database_encryption_key": "",
+                "database_encryption_key": KeychainAPI.databaseKey(),
                 "use_message_database": true, "use_file_database": true,
                 "use_chat_info_database": true, "use_secret_chats": true,
                 "enable_storage_optimizer": true,
