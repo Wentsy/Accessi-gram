@@ -292,6 +292,10 @@ private func installChat() {
             if UIAccessibility.isVoiceOverRunning, let history = HistoryViewport(view),
                let move = HistoryDirection(direction) {
                 state(history.chat).pendingLatest = false
+                if direction == UIAccessibilityScrollDirection.up.rawValue ||
+                   direction == UIAccessibilityScrollDirection.down.rawValue {
+                    if history.nativePage(move) { return true }
+                }
                 return pageHistory(history, direction: move, anchor: history.readingAnchor(direction))
             }
             return original(view, scrollSel, direction)
@@ -818,6 +822,19 @@ private struct HistoryViewport {
         guard let (scroller, point) = scrollTarget(direction, distance: distance) else { return false }
         scroller.setContentOffset(point, animated: false)
         return true
+    }
+
+    // Use Telegram's own synchronous ListView paging for deliberate three-finger scrolls.
+    // It updates the virtualized rows and retains the native focus mapping.
+    func nativePage(_ direction: HistoryDirection) -> Bool {
+        let selector = NSSelectorFromString("accessibilityScroll:")
+        guard let method = class_getInstanceMethod(type(of: node), selector) else { return false }
+        let function = unsafeBitCast(method_getImplementation(method),
+                                     to: (@convention(c) (NSObject, Selector, Int) -> Bool).self)
+        let nativeDirection = direction == .older
+            ? UIAccessibilityScrollDirection.up.rawValue
+            : UIAccessibilityScrollDirection.down.rawValue
+        return function(node, selector, nativeDirection)
     }
 
     func adjacent(to element: UIView, direction: HistoryDirection) -> (element: UIView, frame: CGRect)? {
