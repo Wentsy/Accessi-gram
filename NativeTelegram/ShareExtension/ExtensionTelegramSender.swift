@@ -24,18 +24,20 @@ private extension Dictionary where Key == String, Value == Any {
     }
 }
 
+enum ShareSignInStage: Equatable {
+    case apiCredentials, connecting, phone, code, password, email, emailCode
+    case qr(String), ready
+}
+
 enum ShareSendError: LocalizedError {
-    case notInitialized
     case authorizationRequired
     case noRecipient
     case failed(String)
 
     var errorDescription: String? {
         switch self {
-        case .notInitialized:
-            return "分享功能尚未取得 Telegram 登入資料。請先更新並開啟 Accessi Gram 一次，再重新分享。"
         case .authorizationRequired:
-            return "分享功能的 Telegram 登入已失效。請開啟 Accessi Gram 重新建立登入資料。"
+            return "請先在 Accessi Gram 分享視窗登入 Telegram；分享登入與聊天 App 的登入相互獨立。"
         case .noRecipient:
             return "找不到你選擇的聯絡人或聊天室"
         case .failed(let message):
@@ -48,7 +50,8 @@ enum ShareSendError: LocalizedError {
 final class ExtensionTelegramSender {
     private var clientID: Int32 = 0
     private var callbacks: [String: (TDJSON) -> Void] = [:]
-    private var authorizationWaiters: [CheckedContinuation<Void, Error>] = []
+    private(set) var stage: ShareSignInStage = .connecting
+    var onStageChanged: ((ShareSignInStage) -> Void)?
     private var authReady = false
     private var parametersSent = false
     private var configuration: ShareSessionConfiguration?
@@ -56,39 +59,89 @@ final class ExtensionTelegramSender {
     private var completedMessages: [Int64: Result<Void, Error>] = [:]
     private var deliveredShareItems: [String: Set<Int>] = [:]
 
-    func connect() async throws {
-        if authReady { return }
-        // Preserve the real cause (missing App Group entitlement, missing
-        // TDLib snapshot, corrupt configuration). Old code flattened all of
-        // these into the same misleading "open the app once" message.
-        let config = try ShareSessionBootstrap.configuration()
+    private func updateStage(_ next: ShareSignInStage) {
+        stage = next
+        onStageChanged?(next)
+    }
+
+    /// Called by the recipient picker. The extension owns its database and
+    /// persists authorization in its private sandbox across share sessions.
+    func start() async throws {
+        if clientID != 0 { return }
+        let config: ShareSessionConfiguration
+        do {
+            config = try ShareSessionBootstrap.configuration()
+        } catch ShareSessionError.missingAPICredentials {
+            updateStage(.apiCredentials)
+            return
+        }
         configuration = config
-
-        if clientID == 0 {
-            clientID = td_create_client_id()
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                while true {
-                    if let response = td_receive(0.25) {
-                        let bytes = Data(String(cString: response).utf8)
-                        if let json = try? JSONSerialization.jsonObject(with: bytes) as? TDJSON {
-                            Task { @MainActor [weak self] in self?.receive(json) }
-                        }
+        updateStage(.connecting)
+        clientID = td_create_client_id()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            while true {
+                if let response = td_receive(0.25) {
+                    let bytes = Data(String(cString: response).utf8)
+                    if let json = try? JSONSerialization.jsonObject(with: bytes) as? TDJSON {
+                        Task { @MainActor [weak self] in self?.receive(json) }
                     }
-                    // The extension process owns its own TDLib receiver;
-                    // it terminates with the share sheet's process.
-                    guard self != nil else { return }
                 }
-            }
-            call("getAuthorizationState") { [weak self] state in
-                self?.handleAuthorization(state)
+                guard self != nil else { return }
             }
         }
+        let response = try await query("getAuthorizationState")
+        handleAuthorization(response)
+    }
 
-        try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<Void, Error>) in
-            if authReady { continuation.resume() }
-            else { authorizationWaiters.append(continuation) }
-        }
+    func saveAPI(id: Int, hash: String) async throws {
+        _ = try ShareSessionBootstrap.saveCredentials(apiID: id, apiHash: hash)
+        try await start()
+    }
+
+    private func authorize(_ method: String, _ arguments: TDJSON = [:]) async throws {
+        _ = try await query(method, arguments)
+        let state = try await query("getAuthorizationState")
+        handleAuthorization(state)
+    }
+
+    func submitPhone(_ phone: String) async throws {
+        try await authorize("setAuthenticationPhoneNumber", [
+            "phone_number": phone,
+            "settings": [
+                "@type": "phoneNumberAuthenticationSettings",
+                "allow_flash_call": false,
+                "allow_missed_call": false,
+                "is_current_phone_number": false,
+                "allow_sms_retriever_api": false
+            ] as TDJSON
+        ])
+    }
+
+    func submitCode(_ code: String) async throws {
+        try await authorize("checkAuthenticationCode", ["code": code])
+    }
+
+    func submitPassword(_ password: String) async throws {
+        try await authorize("checkAuthenticationPassword", ["password": password])
+    }
+
+    func submitEmail(_ email: String) async throws {
+        try await authorize("setAuthenticationEmailAddress", ["email_address": email])
+    }
+
+    func submitEmailCode(_ code: String) async throws {
+        try await authorize("checkAuthenticationEmailCode", [
+            "code": ["@type": "emailAddressAuthenticationCode", "code": code] as TDJSON
+        ])
+    }
+
+    func requestQR() async throws {
+        try await authorize("requestQrCodeAuthentication", ["other_user_ids": [] as [Int64]])
+    }
+
+    func connect() async throws {
+        try await start()
+        guard authReady else { throw ShareSendError.authorizationRequired }
     }
 
     private func call(_ name: String, _ parameters: TDJSON = [:],
@@ -150,8 +203,12 @@ final class ExtensionTelegramSender {
             parametersSent = true
             let database = ShareSessionBootstrap.databaseDirectory
             let files = ShareSessionBootstrap.filesDirectory
-            try? FileManager.default.createDirectory(at: files,
-                                                     withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(
+                at: database, withIntermediateDirectories: true
+            )
+            try? FileManager.default.createDirectory(
+                at: files, withIntermediateDirectories: true
+            )
             call("setTdlibParameters", [
                 "database_directory": database.path,
                 "files_directory": files.path,
@@ -169,29 +226,33 @@ final class ExtensionTelegramSender {
                 "application_version": "1.0",
                 "use_test_dc": false
             ]) { [weak self] response in
-                if response.text("@type") == "error" &&
-                    !response.text("message").localizedCaseInsensitiveContains("unexpected setTdlibParameters") {
-                    self?.rejectAuthorization(ShareSendError.failed(response.text("message")))
+                if response.text("@type") == "error" {
+                    self?.onAuthorizationError?(response.text("message"))
                 }
             }
         case "authorizationStateReady":
             authReady = true
-            let waiters = authorizationWaiters
-            authorizationWaiters.removeAll()
-            waiters.forEach { $0.resume() }
-        case "authorizationStateWaitPhoneNumber", "authorizationStateWaitCode",
-             "authorizationStateWaitPassword", "authorizationStateClosed":
-            rejectAuthorization(ShareSendError.authorizationRequired)
+            updateStage(.ready)
+        case "authorizationStateWaitPhoneNumber":
+            updateStage(.phone)
+        case "authorizationStateWaitCode":
+            updateStage(.code)
+        case "authorizationStateWaitPassword":
+            updateStage(.password)
+        case "authorizationStateWaitEmailAddress":
+            updateStage(.email)
+        case "authorizationStateWaitEmailCode":
+            updateStage(.emailCode)
+        case "authorizationStateWaitOtherDeviceConfirmation":
+            updateStage(.qr(state.text("link")))
+        case "authorizationStateClosed":
+            onAuthorizationError?("分享登入工作階段已關閉，請重新開啟分享視窗")
         default:
             break
         }
     }
 
-    private func rejectAuthorization(_ error: Error) {
-        let waiters = authorizationWaiters
-        authorizationWaiters.removeAll()
-        waiters.forEach { $0.resume(throwing: error) }
-    }
+    var onAuthorizationError: ((String) -> Void)?
 
     /// Read recent chats from TDLib itself, not a cache of phone contacts.
     /// Telegram sends chat IDs as int64 decimal strings through the JSON API.
