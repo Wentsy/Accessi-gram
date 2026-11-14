@@ -101,3 +101,56 @@ TELEGRAM_API_ID="$MY_TG_API_ID" TELEGRAM_API_HASH="$MY_TG_API_HASH" bash scripts
 - `AccessibleSettingsController` 新增 **App 開啟時新訊息震動** 可調整選項，預設開啟，值以 UserDefaults 儲存，可在 VoiceOver 直接點擊開關。
 
 OC 請拉取同一分支 `rewrite/native-tdlib-voiceover` 的最新提交重新打包，直接覆蓋安裝，沿用 Bundle ID、Keychain 與 TDLib 資料庫。修正沒有改登入流程。依使用者要求，此處只提交原始碼，不進行回歸測試；OC 可依實際 iOS 編譯結果接手。注意所有 iPhone / iOS 設備震動行為仍受系統觸覺設定限制。
+
+## 2026-11-14：系統通知、語音播放器、跨 App 分享、鍵盤與全螢幕
+
+本次更新保留前一版已驗證可以使用的登入、前景震動及附件上傳流程。OC 拉取分支最新版即可，**不可刪除 App 或清空 TDLib 本機資料庫**。
+
+### 1. APNs 遠端推播與 iOS 原生通知
+
+新增 SystemNotificationManager.swift，整合 UIApplicationDelegate、UNUserNotificationCenter 授權、registerForRemoteNotifications、APNs device token、TDLib registerDevice(deviceTokenApplePush)、processPushNotification。使用者在「設定 → iOS 系統通知」點兩下請求權限；允許後自動向 Telegram 註冊裝置。App 前景仍使用原有震動，不重覆發系統橫幅；背景或關閉 App 時依賴 iOS 原生 APNs 通知中心、鎖定畫面與系統音效，點擊通知後可開啟對應對話。
+
+**這需要 OC 同時完成下列外部設定，僅編譯程式碼不足以保證背景推播：**
+
+- Apple Developer 對主 App 的 App ID org.accessigram.native 開啟 Push Notifications 與 App Groups，並對 Share Extension 的 App ID org.accessigram.native.share 開啟同一個 App Group：group.org.accessigram.native。建立含這些權限的 iOS provisioning profiles，且都要由相同 Apple Team 簽名。先簽署 PlugIns 內的 .appex，再簽署主 .app。
+- 主 App 的 Resources/App.entitlements 已提供 aps-environment=development。若使用正式發行描述檔，必須改成 production 並使用生產環境 APNs token；不可以用開發環境 token 註冊生產環境，反之亦然。
+- Bundle 的 TelegramAPNsIsSandbox 必須與 provision profile 匹配。build.sh 支援 `TELEGRAM_APNS_SANDBOX=YES` (開發) 或 `TELEGRAM_APNS_SANDBOX=NO` (正式) 注入 Info.plist，預設 false。
+- **Telegram API 應用在 my.telegram.org 必須配置相容的 Apple 推播憑證／伺服器驗證資料**。這是 Telegram 向 Apple 發送 APNs 所需的服務端憑證，不能單靠 App 端自行產生，也不能借用官方 Telegram 的推播資格。
+- 正式的遠端通知聲音由 Telegram APNs payload 及 iOS 通知設定決定；本版使用 iOS 系統原生音效，不虛設無法生效的「任選 iOS 原生通知音」選單。使用者可透過 iOS 設定調整允許通知、聲音及顯示方式。
+- 如果使用的個人簽署方案不支援 Push Notifications / App Groups，就無法保證 App 關閉後收到系統推播。前景震動不受此影響。App 被使用者強制結束後，iOS 不保證會喚醒它處理背景 silent push；若遠端 alert push 配置正確，系統仍可顯示通知。
+
+### 2. 語音訊息：OGG／Opus 原生播放
+
+新增 Swift Package 依賴 `sbooth/opus-binary-xcframework` 0.3.0 與 `sbooth/ogg-binary-xcframework` 0.1.3，使用 opusfile 解碼 Telegram 常見 OGG/Opus 至暫存 PCM WAV，交給 iOS AVAudioPlayer 播放。新增 OggOpusTranscoder.swift、VoicePlayerScreen.swift。雙擊語音訊息會直接開啟播放器，下載完成後自動開始播放；原生 UIKit 介面提供 VoiceOver 可讀的播放、暫停、快轉進度、播放速度 1／1.5／2 倍和秒數。M4A、MP3 等 iOS 已支援格式則直接使用原生解碼。
+
+一般文件改用 AccessibleDocumentViewer.swift，具有原生 UIKit「預覽檔案」（Quick Look）、「使用其他 App 開啟或分享檔案」，避免下載後陷入沒有可朗讀內容的 SwiftUI 檔案頁。
+
+### 3. 真正的 iOS Share Extension
+
+新增 AccessiGramShareExtension target（.appex），ShareExtension/ShareViewController.swift、Shared/ShareMailbox.swift。從其他 App 叫出系統分享選單可開啟 Accessi Gram 分享視窗，在視窗內搜尋私聊／群組／聯絡人，輸入說明文字並確認分享。App 將最近聊天和聯絡人清單同步到 App Group 容器；Share Extension 把檔案和說明文字安全寫入共用容器佇列；**再次開啟 Accessi Gram 時會自動送出**，不再只有進入主程式卻不選收件人。
+
+**iOS 限制：** Apple 不允許一般 Share Extension 使用未公開 API 強制啟動主 App，因此這個版本採用官方支援的「選收件人 → 暫存 → 開啟 App 自動送出」流程，而不是保證 Share Extension 在背景就直接以使用者帳號送出。分享對話框必須清楚告知「請開啟 Accessi Gram 後完成傳送」，不可顯示「已成功傳送」假訊息。Share Extension 不重複登入 TDLib，不共用 TDLib 資料庫句柄，避免破壞主 App 的登入。
+
+### 4. VoiceOver 選單與鍵盤收合
+
+訊息操作、機器人互動、表情回應的 SwiftUI confirmationDialog 由 AccessibleChoiceSheet.swift 的原生 UIKit UITableView 取代，每個選項具有獨立繁體中文 VoiceOver 焦點、標籤及操作提示。音訊播放器和一般文件亦改為 UIKit。
+
+輸入文字後點傳送**不收鍵盤**，方便連續輸入；用 VoiceOver 左右滑從輸入列回到任一訊息時，該訊息取得焦點後自動收鍵盤，不強制跳開訊息焦點；在編輯框空白時點錄音，也會先收起鍵盤。
+
+### 5. 截圖裡上下黑邊與底部空白
+
+已補上正式 iOS LaunchScreen.storyboard 並於 AppInfo.plist 設定 UILaunchStoryboardName，避免舊型 iPhone 相容縮放造成整個 App 上下留下大片黑色區域。這是全畫面尺寸問題，不應用手動偏移或額外 padding 來掩蓋。
+
+### OC 編譯與簽署
+
+```bash
+cd Accessi-gram/NativeTelegram
+TELEGRAM_API_ID="$MY_TG_API_ID" \
+TELEGRAM_API_HASH="$MY_TG_API_HASH" \
+TELEGRAM_APNS_SANDBOX=YES \
+bash scripts/build.sh
+```
+
+上述 YES 僅適用開發型 APNs 描述檔，生產簽名須改用 NO，並讓 App.entitlements 的 aps-environment 與描述檔一致。此腳本提供**未簽名 IPA**，**不會自動申請 APNs 金鑰、不會向 Telegram 註冊服務端憑證、也不會替 OC 建立 Apple App Groups 能力**。IPA 內需有 PlugIns/AccessiGramShareExtension.appex。維持 main Bundle ID、Keychain、TDLib 路徑不變；請勿讓簽名或 app group 設定改變既有帳號容器。App 與 extension 的 CFBundleVersion 已由 CURRENT_PROJECT_VERSION 控制，OC 可照原有流程自動遞增，不需把尾碼寫死。
+
+**狀態：** 原始碼已提交，但此環境未執行 Xcode 編譯及真機檢查，因此語音播放、背景 APNs、Share Extension 與全螢幕修正不能宣稱已實測成功。由 OC 拉取最新提交後依 Apple 簽署能力和 Telegram 憑證進行打包。
