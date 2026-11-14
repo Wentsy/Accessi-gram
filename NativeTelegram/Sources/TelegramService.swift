@@ -12,44 +12,54 @@ enum AuthStage: String {
 
 enum KeychainAPI {
     static let account = "org.accessigram.native.telegram"
+    static let databaseAccount = "org.accessigram.native.database"
+
     static func save(id: Int, hash: String) {
         let data = try! JSONSerialization.data(withJSONObject: ["id": id, "hash": hash])
-        SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrAccount: account] as CFDictionary)
-        SecItemAdd([kSecClass: kSecClassGenericPassword, kSecAttrAccount: account,
-                    kSecValueData: data,
-                    kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly] as CFDictionary, nil)
-    }
-    static func databaseKey() -> String {
-        let keyAccount = "org.accessigram.native.database"
-        var found: CFTypeRef?
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrAccount: keyAccount,
-            kSecMatchLimit: kSecMatchLimitOne,
-            kSecReturnData: true
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account
         ]
+        SecItemDelete(query as CFDictionary)
+        var attributes = query
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(attributes as CFDictionary, nil)
+    }
+
+    static func databaseKey() -> String {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: databaseAccount,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecReturnData as String: true
+        ]
+        var found: CFTypeRef?
         if SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess {
             return (found as! Data).base64EncodedString()
         }
         var bytes = [UInt8](repeating: 0, count: 32)
         SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         let data = Data(bytes)
-        SecItemAdd([
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrAccount: keyAccount,
-            kSecValueData: data,
-            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        ] as CFDictionary, nil)
+        var attributes = query
+        attributes.removeValue(forKey: kSecMatchLimit as String)
+        attributes.removeValue(forKey: kSecReturnData as String)
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(attributes as CFDictionary, nil)
         return data.base64EncodedString()
     }
 
     static func load() -> (Int, String)? {
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching([kSecClass: kSecClassGenericPassword,
-                                          kSecAttrAccount: account, kSecReturnData: true,
-                                          kSecMatchLimit: kSecMatchLimitOne] as CFDictionary, &result)
-        guard status == errSecSuccess else { return nil }
-        let json = try! JSONSerialization.jsonObject(with: result as! Data) as! JSONObject
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var found: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess else { return nil }
+        let json = try! JSONSerialization.jsonObject(with: found as! Data) as! JSONObject
         return (Int(json.number("id")), json.text("hash"))
     }
 }
