@@ -62,7 +62,14 @@ enum KeychainAPI {
             let json = try! JSONSerialization.jsonObject(with: found as! Data) as! JSONObject
             return (Int(json.number("id")), json.text("hash"))
         }
-        return (37253223, "aca2ec3d1e441897a84b1de89c4cb739")
+        // OC can embed credentials in the compiled app's Info.plist without
+        // committing personal API secrets to this public repository.
+        let info = Bundle.main.infoDictionary ?? [:]
+        let bundledID = (info["TelegramAPIID"] as? String) ?? "\(info["TelegramAPIID"] as? Int ?? 0)"
+        let bundledHash = info["TelegramAPIHash"] as? String ?? ""
+        guard let id = Int(bundledID), id > 0, !bundledHash.isEmpty else { return nil }
+        save(id: id, hash: bundledHash)
+        return (id, bundledHash)
     }
 }
 
@@ -77,6 +84,8 @@ final class TelegramService: ObservableObject {
     @Published var searchResults: [TelegramChat] = []
     @Published var archived = false
     @Published var loadingChats = false
+    @Published var chatSyncStatus = "等待同步聊天"
+    @Published var hasLoadedChatList = false
     @Published var moreChatsAvailable = true
     @Published var passwordHint = ""
     @Published var contacts: [TelegramContact] = []
@@ -91,6 +100,7 @@ final class TelegramService: ObservableObject {
     private var requestedUsers = Set<Int64>()
     private var receiverStarted = false
     private var chatListLimit = 100
+    private var parametersRequested = false
 
     private init() {}
 
@@ -120,8 +130,12 @@ final class TelegramService: ObservableObject {
                 }
             }
         }
+        // State notifications and getAuthorizationState can arrive out of order.
+        // handleAuth is idempotent and sends parameters only once.
         request("getAuthorizationState") { [weak self] response in
-            self?.handleAuth(response)
+            if response.text("@type").hasPrefix("authorizationState") {
+                self?.handleAuth(response)
+            }
         }
     }
 
@@ -161,19 +175,8 @@ final class TelegramService: ObservableObject {
             publishChats()
         case "updateChatPosition":
             let id = json.number("chat_id")
-            let position = json.object("position")
-            if var chat = chatsByID[id] {
-                let kind = position.object("list").text("@type")
-                if kind == "chatListMain" {
-                    chat.order = position.number("order")
-                    chat.isArchived = false
-                } else if kind == "chatListArchive" && position.number("order") != 0 {
-                    chat.order = position.number("order")
-                    chat.isArchived = true
-                }
-                chat.isPinned = position.flag("is_pinned")
-                chatsByID[id] = chat
-                publishChats()
+            request("getChat", ["chat_id": id]) { [weak self] raw in
+                if raw.text("@type") == "chat" { self?.addChat(raw) }
             }
         case "updateChatLastMessage":
             let id = json.number("chat_id")
@@ -210,7 +213,7 @@ final class TelegramService: ObservableObject {
                 self?.receive(object)
             }
         case "updateDeleteMessages":
-            let ids = Set((json["message_ids"] as? [NSNumber] ?? []).map(\.int64Value))
+            let ids = Set(json.intIDs("message_ids"))
             threads[json.number("chat_id")]?.remove(ids)
         default: break
         }
@@ -219,9 +222,11 @@ final class TelegramService: ObservableObject {
     private func handleAuth(_ state: JSONObject) {
         switch state.text("@type") {
         case "authorizationStateWaitTdlibParameters":
+            guard !parametersRequested else { return }
+            parametersRequested = true
             let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            command("setTdlibParameters", [
+            request("setTdlibParameters", [
                 "api_id": apiID, "api_hash": apiHash,
                 "database_directory": root.appendingPathComponent("tdlib").path,
                 "files_directory": root.appendingPathComponent("files").path,
@@ -233,7 +238,17 @@ final class TelegramService: ObservableObject {
                 "system_version": UIDevice.current.systemVersion,
                 "device_model": UIDevice.current.model,
                 "application_version": "1.0", "use_test_dc": false
-            ])
+            ]) { [weak self] response in
+                guard let self else { return }
+                if response.text("@type") == "error" {
+                    let detail = response.text("message")
+                    // Race with an already accepted initialization is harmless.
+                    if !detail.localizedCaseInsensitiveContains("unexpected setTdlibParameters") {
+                        self.parametersRequested = false
+                        self.errorMessage = detail
+                    }
+                }
+            }
         case "authorizationStateWaitPhoneNumber": authStage = .phone
         case "authorizationStateWaitCode": authStage = .code
         case "authorizationStateWaitPassword":
@@ -245,8 +260,12 @@ final class TelegramService: ObservableObject {
             authStage = .qr
             qrLink = state.text("link")
         case "authorizationStateReady":
+            let firstReady = authStage != .ready
             authStage = .ready
-            loadChats()
+            if firstReady {
+                chatSyncStatus = "正在同步 Telegram 對話與群組"
+                loadChats()
+            }
         case "authorizationStateLoggingOut", "authorizationStateClosed": authStage = .phone
         default: authStage = .unknown
         }
@@ -270,16 +289,35 @@ final class TelegramService: ObservableObject {
     func logOut() { command("logOut") }
 
     func loadChats() {
-        if loadingChats { return }
+        guard authStage == .ready, !loadingChats else { return }
         loadingChats = true
+        chatSyncStatus = "正在同步 Telegram 對話與群組"
         let list: JSONObject = ["@type": archived ? "chatListArchive" : "chatListMain"]
+
+        // loadChats starts TDLib's normal cloud/cache synchronization.
+        // Its result may say "Not enough chats"; getChats still returns the cache.
         request("loadChats", ["chat_list": list, "limit": 100]) { [weak self] _ in
-            self?.loadingChats = false
-            self?.request("getChats", ["chat_list": list, "limit": self?.chatListLimit ?? 100]) { [weak self] result in
-                let ids = (result["chat_ids"] as? [NSNumber] ?? []).map(\.int64Value)
-                self?.moreChatsAvailable = ids.count >= (self?.chatListLimit ?? 100)
+            guard let self else { return }
+            self.request("getChats", ["chat_list": list, "limit": self.chatListLimit]) { [weak self] result in
+                guard let self else { return }
+                self.loadingChats = false
+                self.hasLoadedChatList = true
+                let ids = result.intIDs("chat_ids")
+                self.moreChatsAvailable = ids.count >= self.chatListLimit
+                if result.text("@type") == "error" {
+                    self.chatSyncStatus = "同步暫時失敗，可按重新同步"
+                    self.errorMessage = result.text("message")
+                    return
+                }
+                if ids.isEmpty {
+                    self.chatSyncStatus = "尚未取得對話，正在等候 Telegram 更新"
+                    return
+                }
+                self.chatSyncStatus = "正在顯示 \(ids.count) 個對話"
+                // Request cached chat objects; TDLib will continue delivering
+                // updateNewChat/updateChatPosition while syncing the account.
                 for id in ids {
-                    self?.request("getChat", ["chat_id": id]) { [weak self] raw in
+                    self.request("getChat", ["chat_id": id]) { [weak self] raw in
                         if raw.text("@type") == "chat" { self?.addChat(raw) }
                     }
                 }
@@ -312,6 +350,9 @@ final class TelegramService: ObservableObject {
         chats = chatsByID.values
             .filter { $0.isArchived == archived && $0.order > 0 }
             .sorted { $0.order == $1.order ? $0.id > $1.id : $0.order > $1.order }
+        if !chats.isEmpty {
+            chatSyncStatus = "已同步 \(chats.count) 個對話"
+        }
     }
 
 
@@ -543,7 +584,7 @@ final class TelegramService: ObservableObject {
         if query.isEmpty { searchResults = []; return }
         request("searchChatsOnServer", ["query": query, "limit": 30]) { [weak self] result in
             guard let self else { return }
-            let ids = (result["chat_ids"] as? [NSNumber] ?? []).map(\.int64Value)
+            let ids = result.intIDs("chat_ids")
             self.searchResults = ids.compactMap { self.chatsByID[$0] }
             for id in ids where self.chatsByID[id] == nil {
                 self.request("getChat", ["chat_id": id]) { [weak self] object in
