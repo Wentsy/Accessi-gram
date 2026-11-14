@@ -2,8 +2,6 @@ import SwiftUI
 
 @main
 struct AccessiGramNativeApp: App {
-    @UIApplicationDelegateAdaptor(SystemNotificationManager.self) private var appDelegate
-    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var service = TelegramService.shared
 
     var body: some Scene {
@@ -13,12 +11,6 @@ struct AccessiGramNativeApp: App {
                 .environment(\.locale, Locale(identifier: "zh_TW"))
                 .task {
                     service.start()
-                    SystemNotificationManager.shared.refreshAuthorizationStatus()
-                }
-                .onChange(of: scenePhase) { phase in
-                    if phase == .active {
-                        SystemNotificationManager.shared.refreshAuthorizationStatus()
-                    }
                 }
         }
     }
