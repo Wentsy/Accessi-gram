@@ -6,7 +6,7 @@ struct NewChatScreen: View {
     @State private var searchText = ""
     @State private var openedChatID: Int64?
 
-    var filteredContacts: [(id: Int64, name: String)] {
+    var filteredContacts: [TelegramContact] {
         if searchText.isEmpty { return service.contacts }
         return service.contacts.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
@@ -24,7 +24,7 @@ struct NewChatScreen: View {
                 .disabled(username.isEmpty)
             }
             Section("聯絡人") {
-                ForEach(filteredContacts, id: \.id) { contact in
+                ForEach(filteredContacts) { contact in
                     Button(contact.name) {
                         service.createPrivateChat(userID: contact.id) { openedChatID = $0 }
                     }
