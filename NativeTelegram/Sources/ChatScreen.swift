@@ -143,17 +143,9 @@ struct ChatScreen: View {
                     Task {
                         do {
                             let local = try await AttachmentPreparation.copyFromFiles(url)
-                            let type = UTType(filenameExtension: local.pathExtension)
-                            // Files picker means "send file", preserving the
-                            // original name and type instead of coercing it.
-                            let kind = type?.conforms(to: .movie) == true ? "video" :
-                                       type?.conforms(to: .image) == true ? "photo" : "document"
-                            if kind == "video" {
-                                let converted = try await AttachmentPreparation.videoForTelegram(local)
-                                service.sendMedia(chatID: chatID, fileURL: converted, kind: "video")
-                            } else {
-                                service.sendMedia(chatID: chatID, fileURL: local, kind: kind)
-                            }
+                            // A file chosen in Files is sent as a document,
+                            // preserving its original filename and format.
+                            service.sendMedia(chatID: chatID, fileURL: local, kind: "document")
                         } catch {
                             service.errorMessage = "無法傳送檔案 \(url.lastPathComponent)：\(error.localizedDescription)"
                         }
