@@ -35,9 +35,7 @@ enum AccessibleSystemMenu {
                                         y: presenter.view.bounds.midY,
                                         width: 1, height: 1)
         }
-        presenter.present(sheet, animated: true) {
-            UIAccessibility.post(notification: .screenChanged, argument: sheet.view)
-        }
+        presenter.present(sheet, animated: true)
     }
 
     static func editMessage(initial: String,
@@ -55,10 +53,7 @@ enum AccessibleSystemMenu {
         alert.addAction(UIAlertAction(title: "儲存修改", style: .default) { _ in
             onSave(alert.textFields?.first?.text ?? "")
         })
-        presenter.present(alert, animated: true) {
-            UIAccessibility.post(notification: .screenChanged,
-                                 argument: alert.textFields?.first)
-        }
+        presenter.present(alert, animated: true)
     }
 
     private static func visibleController() -> UIViewController? {
