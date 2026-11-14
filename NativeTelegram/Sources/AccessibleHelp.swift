@@ -14,7 +14,7 @@ final class AccessibleHelpController: UITableViewController {
             Topic(title: "訊息朗讀順序",
                   explanation: "每則訊息是獨立的旁白焦點，依序朗讀發送者姓名、訊息內容、發送時間。文字、語音、照片、影片、群組與頻道訊息都使用同一套順序。"),
             Topic(title: "左右滑動與歷史訊息",
-                  explanation: "在聊天訊息區用單指左右滑，每次移動到一則訊息。接近歷史前端時，程式會預先載入更早的內容，並保留當前閱讀位置。若網路不穩，訊息載入可能需要一些時間。"),
+                  explanation: "在聊天訊息區用單指左右滑，每次移動到一則訊息。到最新訊息之後，繼續右滑會直接進入照片、附件、斜線命令與訊息編輯框，不經過人工轉接項目。接近歷史前端時會預先載入更早內容；若網路不穩，可能需要一些時間。"),
             Topic(title: "群組與頻道",
                   explanation: "群組和頻道也使用相同的訊息閱讀方式。長篇貼文的文字與附件描述合在同一則訊息中，避免左右滑動時被拆成多個焦點。")
         ]),
@@ -44,7 +44,7 @@ final class AccessibleHelpController: UITableViewController {
             Topic(title: "前景震動",
                   explanation: "App 開啟期間收到新訊息會震動，設定可選擇開啟或關閉；載入舊訊息與自己送出的訊息不會觸發。"),
             Topic(title: "從其他 App 分享",
-                  explanation: "在其他 App 的分享介面選擇 Accessi Gram，先選擇聯絡人或群組，再輸入說明文字。分享選單會直接從 Telegram 取得最近的聊天清單，讓你選擇聯絡人、群組或頻道。Share Extension 會自行連線 Telegram 並傳送，收到伺服器確認成功才結束分享視窗，不需要再開啟主 App。首次更新後要開啟新版 Accessi Gram 一次，建立分享專用的登入資料。分享大型影片時請保持分享視窗開啟。")
+                  explanation: "在其他 App 的分享介面選擇 Accessi Gram，先選擇聯絡人或群組，再輸入說明文字。分享選單會直接從 Telegram 取得最近的聊天清單，讓你選擇聯絡人、群組或頻道。分享延伸功能擁有獨立的 Telegram 登入。第一次分享時在分享視窗完成一次登入，往後會保留登入狀態，不需要再開啟主 App，也不需要 App Groups 簽署權限。選好最近對話、輸入說明後直接傳送，收到 Telegram 成功回報才結束分享。大型影片仍需保持分享視窗開啟。")
         ]),
         ("其他", [
             Topic(title: "登入與同步",
