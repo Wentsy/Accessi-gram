@@ -81,6 +81,13 @@ enum ShareMailbox {
         root?.appendingPathComponent(attachment.relativePath)
     }
 
+    static func discardFiles(for draft: PendingShare) {
+        guard let root else { return }
+        let directory = root.appendingPathComponent("shared-uploads", isDirectory: true)
+            .appendingPathComponent(draft.id, isDirectory: true)
+        try? FileManager.default.removeItem(at: directory)
+    }
+
     static func complete(_ draft: PendingShare) {
         guard let root else { return }
         let file = root.appendingPathComponent("pending-shares")
