@@ -203,6 +203,9 @@ struct ConversationsScreen: View {
                     Button(service.archived ? "返回聊天" : "封存") { service.toggleArchive() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink { NewChatScreen() } label: { Label("新增聊天", systemImage: "square.and.pencil") }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { showSettings = true } label: { Label("設定", systemImage: "gearshape") }
                 }
             }
