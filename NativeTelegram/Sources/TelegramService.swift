@@ -457,6 +457,14 @@ final class TelegramService: ObservableObject {
         }
     }
 
+    func react(_ message: TelegramMessage, emoji: String) {
+        command("addMessageReaction", [
+            "chat_id": message.chatID, "message_id": message.id,
+            "reaction_type": ["@type": "reactionTypeEmoji", "emoji": emoji],
+            "is_big": false, "update_recent_reactions": true
+        ])
+    }
+
     func delete(_ message: TelegramMessage) {
         command("deleteMessages", ["chat_id": message.chatID, "message_ids": [message.id], "revoke": true])
     }
