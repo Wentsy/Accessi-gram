@@ -38,6 +38,11 @@ enum ShareSessionBootstrap {
         try? manager.removeItem(at: configURL)
         try? manager.removeItem(at: databaseDirectory)
         try? manager.removeItem(at: filesDirectory)
+        if let root = ShareMailbox.root {
+            try? manager.removeItem(at: root.appendingPathComponent("recipients.json"))
+            try? manager.removeItem(at: root.appendingPathComponent("pending-shares"))
+            try? manager.removeItem(at: root.appendingPathComponent("shared-uploads"))
+        }
     }
 
     static func configuration() throws -> ShareSessionConfiguration {
