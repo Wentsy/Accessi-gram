@@ -31,16 +31,24 @@ bash scripts/build.sh
 
 ## 目前限制
 
-使用者已回報前一版可以成功登入，但聊天室列表空白與 VoiceOver 朗讀異常，因此本分支加入**TDLib 64 位元字串解析、完整聊天分批同步，以及原生 UIKit 聊天列表／設定／聯絡人無障礙介面**。此修正尚未由 OC 重新編譯／實機驗證，不能當已確認穩定版。詳見 `docs/OC_HANDOFF.md`。通話、故事、貼圖商店、完整管理員工具、付款及加密通話不在本版範圍；推播註冊程式碼已加入，但仍依賴 OC 的 APNs 簽署和 Telegram 推播憑證；訊息及媒體、聊天與翻頁為優先。
+使用者已回報前一版可以成功登入，但聊天室列表空白與 VoiceOver 朗讀異常，因此本分支加入**TDLib 64 位元字串解析、完整聊天分批同步，以及原生 UIKit 聊天列表／設定／聯絡人無障礙介面**。此修正尚未由 OC 重新編譯／實機驗證，不能當已確認穩定版。詳見 `docs/OC_HANDOFF.md`。通話、故事、貼圖商店、完整管理員工具、付款及加密通話不在本版範圍；背景推播已依使用者要求移除，不需要 APNs 或私人伺服器；訊息及媒體、聊天與翻頁為優先。
 
 ## 本輪無障礙與 iOS 系統整合更新（2026-11-14）
 
 - iPhone 截圖上下黑邊：新增正式 LaunchScreen.storyboard 與 AppInfo.plist，讓 iPhone 以原生完整螢幕尺寸呈現，不再採舊式相容縮放。
 - 鍵盤焦點：傳送文字後保留鍵盤；旁白切回聊天訊息時收起；開始錄音前亦先收起。
 - 語音：收到 Telegram OGG/Opus 語音後使用 opusfile 解碼，原生 UIKit 播放器可自動播放、暫停、調整進度與速度。一般檔案改用 Quick Look 預覽或 iOS 系統分享。
-- 互動選單：聊天訊息操作、機器人按鈕及表情回應全部改為可單項朗讀的 UIKit 清單。
-- App 關閉／背景通知：iOS 原生權限申請、APNs Token 及 Telegram TDLib registerDevice 已整合；**必須由 OC 簽署具有 Push Notifications 權限的 App ID，並替 Telegram API 應用配置 Apple APNs 服務端憑證，才能真正收到系統遠端通知**。未確認以上條件前不可宣稱背景推播可用。
+- 互動選單：聊天訊息操作、機器人按鈕、表情回應及編輯改成 iOS 原生 UIKit 系統動作選單，避免 VoiceOver 打開後整頁空白。
+- 背景推播：已依使用者指示整組取消，無需伺服器、APNs、額外推播簽署。**保留 App 開啟期間新訊息震動提醒**。
 - 跨 App 分享：新增直接使用 Telegram TDLib 的 Share Extension。分享時選收件人、輸入說明文字，再由延伸功能直接上傳；只有收到 Telegram 真正的傳送成功通知才結束分享。不需再手動開啟主 App。首次更新後只要開啟新版 App 一次，便會建立獨立、受保護的分享登入副本。大型附件傳送仍受 iOS 分享程序執行時間限制。
-- 分享及通知所需能力：主 App、Share Extension 的 App Groups，以及主 App 的 aps-environment；**兩個套件需使用同一 Apple Team 簽名，並一起覆蓋安裝**。
+- 分享所需能力：主 App 與 Share Extension 皆要開啟相同的 App Groups；**兩個套件需使用同一 Apple Team 簽名，並一起覆蓋安裝**。不需要 Push Notifications 權限。
 
 **給 OC 的細節與簽署流程：** [docs/OC_HANDOFF.md](docs/OC_HANDOFF.md)。本輪更動已提交，但未在本環境使用 Xcode／iPhone 編譯實測，請由 OC 以相同 Bundle ID、Keychain 與 TDLib 路徑接手打包。
+
+## 2026-11-15：iOS 18.7.8 的修正
+
+- 分享收件人直接向 Telegram TDLib 讀取最近 100 個聊天，不再等待手機聯絡人匯出，也能立即搜尋最近的私聊、群組和頻道。需要分享功能的 App Group 和分享端登入副本仍須正常配置。
+- 檔案傳送從 SwiftUI `fileImporter` 改為原生 `UIDocumentPickerViewController`，確保在「檔案」選擇完按「打開」會實際觸發傳送回呼；支援多選、iCloud 和文件提供者。
+- 所有訊息操作、機器人按鈕、表情回應採 UIKit 原生系統動作選單；語音、圖片、影片、文件統一改用 UIKit 附件檢視畫面。
+- 聊天訊息列表底部新增 VoiceOver 焦點轉接，閱讀完最新訊息可以直接滑到「傳送照片或影片」、附件、編輯框，不再停在「垂直捲軸，100%」。
+- 不改已經能正常登入的 TDLib 帳號資料，也不要求重登；本輪尚未在 Xcode 與 iOS 18.7.8 真機驗證，直接提交給 OC 編譯。
