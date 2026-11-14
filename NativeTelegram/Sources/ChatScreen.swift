@@ -150,22 +150,23 @@ struct ChatScreen: View {
 
     private func showSlashCommandMenu() {
         service.botSlashCommands(chatID: chatID) { commands in
-            if commands.isEmpty {
+            guard !commands.isEmpty else {
                 AccessibleSystemMenu.present(
-                    title: "此聊天沒有已設定的機器人斜線命令",
-                    choices: [AccessibleMenuChoice("manual", "手動輸入 / 指令")]
-                ) { _ in
-                    ComposerBarView.active?.insertBotCommand("")
-                }
+                    title: "此聊天沒有 BotFather 已設定的斜線命令",
+                    choices: [AccessibleMenuChoice("close", "關閉")]
+                ) { _ in }
                 return
             }
             AccessibleSystemMenu.present(
-                title: "機器人斜線命令",
+                title: "選擇要直接傳送的機器人指令",
                 choices: commands.map {
                     AccessibleMenuChoice($0.command, $0.spoken)
                 }
             ) { selected in
-                ComposerBarView.active?.insertBotCommand("/" + selected)
+                let command = "/" + selected
+                service.sendText(chatID: chatID, text: command)
+                UIAccessibility.post(notification: .announcement,
+                                     argument: "已提交機器人指令 \(command)，正在傳送")
             }
         }
     }
