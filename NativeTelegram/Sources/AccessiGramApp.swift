@@ -203,7 +203,7 @@ struct ConversationsScreen: View {
                     Button(service.archived ? "返回聊天" : "封存") { service.toggleArchive() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("設定", systemImage: "gearshape") { showSettings = true }
+                    Button { showSettings = true } label: { Label("設定", systemImage: "gearshape") }
                 }
             }
             .sheet(isPresented: $showSettings) { SettingsScreen() }
