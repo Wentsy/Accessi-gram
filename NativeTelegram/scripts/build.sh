@@ -9,6 +9,12 @@ cp -R build/Build/Products/Release-iphoneos/AccessiGramNative.app dist/Payload/
 if [[ -n "${TELEGRAM_API_ID:-}" && -n "${TELEGRAM_API_HASH:-}" ]]; then
   plutil -replace TelegramAPIID -string "$TELEGRAM_API_ID" dist/Payload/AccessiGramNative.app/Info.plist
   plutil -replace TelegramAPIHash -string "$TELEGRAM_API_HASH" dist/Payload/AccessiGramNative.app/Info.plist
+  # The Share Extension has its own sandbox and Keychain. Bundle the same
+  # public Telegram API application credentials in BOTH targets to avoid
+  # asking the user to type them twice (this is not account authorization).
+  SHARE_INFO="dist/Payload/AccessiGramNative.app/PlugIns/AccessiGramShareExtension.appex/Info.plist"
+  plutil -replace TelegramAPIID -string "$TELEGRAM_API_ID" "$SHARE_INFO"
+  plutil -replace TelegramAPIHash -string "$TELEGRAM_API_HASH" "$SHARE_INFO"
 fi
 rm -f dist/AccessiGramNative-unsigned.ipa
 (cd dist && zip -qyr AccessiGramNative-unsigned.ipa Payload)
