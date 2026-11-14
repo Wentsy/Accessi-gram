@@ -86,6 +86,7 @@ final class TelegramService: ObservableObject {
     @Published var archived = false
     @Published var loadingChats = false
     @Published var chatSyncStatus = "等待同步聊天"
+    @Published var shareSessionStatus = ShareSessionBootstrap.status()
     @Published var hasLoadedChatList = false
     @Published var moreChatsAvailable = true
     @Published var passwordHint = ""
@@ -143,10 +144,12 @@ final class TelegramService: ObservableObject {
                 mainDatabaseDirectory: support.appendingPathComponent("tdlib")
             )
         } catch {
-            // Login continues normally; share errors are shown in the extension
-            // instead of disrupting the currently signed-in account.
-            print("Share session preparation failed: \(error.localizedDescription)")
+            // Missing App Group entitlements or a first-login database is now
+            // visible under Settings, instead of disappearing into the console.
+            shareSessionStatus = "分享準備失敗：\(error.localizedDescription)"
         }
+        shareSessionStatus = ShareSessionBootstrap.status() == "分享登入資料尚未建立"
+            ? shareSessionStatus : ShareSessionBootstrap.status()
 
         clientID = td_create_client_id()
         if !receiverStarted {
@@ -304,11 +307,40 @@ final class TelegramService: ObservableObject {
                 alreadyVibrated.removeAll()
                 recentVibrationIDs.removeAll()
                 chatSyncStatus = "正在同步 Telegram 對話與群組"
+                // First successful login can create its database after
+                // connect(), so provision the share session a second time.
+                prepareShareSession()
                 loadContacts()
                 loadChats()
             }
         case "authorizationStateLoggingOut", "authorizationStateClosed": authStage = .phone
         default: authStage = .unknown
+        }
+    }
+
+    func prepareShareSession() {
+        guard authStage == .ready else { return }
+        shareSessionStatus = "正在準備跨 App 分享登入"
+        let apiID = apiID
+        let apiHash = apiHash
+        let key = KeychainAPI.databaseKey()
+        let directory = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        )[0].appendingPathComponent("tdlib")
+
+        Task.detached(priority: .utility) {
+            let result: String
+            do {
+                result = try ShareSessionBootstrap.prepareBeforeMainTDLibStarts(
+                    apiID: apiID, apiHash: apiHash,
+                    encryptionKey: key, mainDatabaseDirectory: directory
+                )
+            } catch {
+                result = "分享登入準備失敗：\(error.localizedDescription)"
+            }
+            await MainActor.run { [weak self] in
+                self?.shareSessionStatus = result
+            }
         }
     }
 
