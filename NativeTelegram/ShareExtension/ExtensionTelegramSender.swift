@@ -15,6 +15,13 @@ private extension Dictionary where Key == String, Value == Any {
         if let value = self[key] as? String { return Int64(value) ?? 0 }
         return 0
     }
+    func intIDs(_ key: String) -> [Int64] {
+        (self[key] as? [Any] ?? []).compactMap {
+            if let value = $0 as? NSNumber { return value.int64Value }
+            if let value = $0 as? String { return Int64(value) }
+            return nil
+        }
+    }
 }
 
 enum ShareSendError: LocalizedError {
@@ -186,6 +193,32 @@ final class ExtensionTelegramSender {
         let waiters = authorizationWaiters
         authorizationWaiters.removeAll()
         waiters.forEach { $0.resume(throwing: error) }
+    }
+
+    /// Read recent chats from TDLib itself, not a cache of phone contacts.
+    /// Telegram sends chat IDs as int64 decimal strings through the JSON API.
+    func recentRecipients() async throws -> [ShareRecipient] {
+        try await connect()
+        let list: TDJSON = ["@type": "chatListMain"]
+        // loadChats populates the disk cache from the server; returning 404 is
+        // normal once there are no more chats to load.
+        _ = try? await query("loadChats", ["chat_list": list, "limit": 100])
+        let response = try await query("getChats", ["chat_list": list, "limit": 100])
+        let ids = response.intIDs("chat_ids")
+        var result: [ShareRecipient] = []
+        for id in ids {
+            let raw = try await query("getChat", ["chat_id": id])
+            let title = raw.text("title")
+            result.append(ShareRecipient(
+                id: "chat:\(id)",
+                title: title.isEmpty ? "對話 \(id)" : title,
+                chatID: "\(id)",
+                userID: nil
+            ))
+        }
+        // The same on-device list serves as an instant snapshot for next time.
+        if !result.isEmpty { ShareMailbox.saveRecipients(result) }
+        return result
     }
 
     private func targetChatID(_ recipient: ShareRecipient) async throws -> Int64 {
