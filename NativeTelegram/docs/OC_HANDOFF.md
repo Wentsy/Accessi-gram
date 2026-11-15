@@ -1,6 +1,6 @@
 # OC 接手打包 — Accessi Gram Native（最新整合版）
 
-分支：`rewrite/native-tdlib-voiceover`
+分支：`feat/stable-chat-links-read-delete`（新功能分支；起點是 OC 已修正分享附件原始檔名的穩定提交 `d97358311f4cb48de69c7d149d410098e73152ab`）
 
 本文件是目前有效的打包參考，取代舊版曾經要求 App Groups、背景 APNs、分享資料庫快照與人工「聊天輸入列」的做法。**main 不動**。使用者 iPhone 為 iOS 18.7.8，採用「小白簽」簽名，無法取得 App Groups 共用容器。
 
@@ -90,3 +90,36 @@ bash scripts/build.sh
 - 即使打包後改正 Info.plist，先前儲存在分享沙盒的舊 API 憑證仍會優先使用；使用者可利用本次新增的「修改分享功能的 API ID／Hash」覆蓋舊值，無須刪除 App 或重新登入主程式。
 
 本輪只提交原始碼，不在此執行 Xcode 編譯／回歸測試；請由 OC 拉取最新提交接手。原有主 App Bundle ID、Keychain 和登入不能更動。
+
+## 2026-11-15 — 穩定基準新增四組功能：連結、已讀、對話移除、鎖屏播放
+
+**基準承諾**：本分支從 `d973583`（已修復分享附件檔名、且**沒有背景 APNs 推播試驗**）另開，未沿用後續 `c70be814` 起的推播程式、`registerDevice`、`remote-notification`、APNs entitlements 或推播診斷設定。不改 TDLib 資料庫、Keychain、主 App Bundle ID `org.accessigram.native`、Share Extension 獨立登入；維持可覆蓋更新，不須先刪 App。
+
+### 1. 含連結訊息直接由 VoiceOver 動作轉輪開啟
+
+- `TelegramModels.swift` 由 `formattedText.entities` 解析 `textEntityTypeUrl`（明文網址）和 `textEntityTypeTextUrl`（隱藏超連結），含文字與媒體 caption；普通 URL 再用 `NSDataDetector` 補抓，僅開放 HTTP/HTTPS。
+- `AccessibleMessageTimeline.swift` 對每個訊息的 URL 加 `UIAccessibilityCustomAction`「開啟連結，{文字}」，與原有翻譯、回覆、複製等動作並列，不額外建立可卡住 VoiceOver 游標的虛擬元素。
+- `ChatScreen.swift` 透過 `UIApplication.shared.open` 交給 iOS 系統 URL 開啟機制（正常網頁會依系統預設瀏覽器開啟）。**這是 VoiceOver「動作」轉輪，不是改寫 iOS 全局「連結」轉輪。**
+
+### 2. 讀完仍標未讀
+
+- `TelegramService.swift` 每次 `openChat`、`closeChat` 都對最新訊息送 `viewMessages(force_read: true)`；第一次載入歷史與聊天室正在開啟時收到新訊息，也依最新 ID 標已讀。
+- 同時解除手動的 `toggleChatIsMarkedAsUnread(false)`，並處理 TDLib `updateChatReadInbox` 與 `updateChatIsMarkedAsUnread`；聊天列表顯示依 `unread_count` 和明確未讀標記產生。
+- 不改現有增量載入、翻頁焦點策略或已修復的輸入框。
+
+### 3. 聊天列表刪除對話、退出群組、離開頻道
+
+- `AccessibleScreens.swift` 聊天列同時提供 VoiceOver「動作」轉輪與 UIKit 列表尾端滑動操作。
+- 私聊依 Telegram `chat.can_be_deleted_only_for_self` / `chat.can_be_deleted_for_all_users` 顯示可用的選項；彈出系統選單後選「僅為我刪除」（`deleteChatHistory(revoke:false)`）或「為雙方刪除」（`revoke:true`），均設定 `remove_from_chat_list:true`。
+- 基本群組、超級群組及頻道顯示相應的「退出群組」／「離開頻道」，確認後執行 `leaveChat`，再嘗試將對話從列表移除。
+- 只有 TDLib 操作回報成功後才自聊天列表移除；伺服器拒絕時以既有 Telegram 提示回報。刪除和離開都由使用者確認才真正執行。
+
+### 4. 語音與音檔在鎖定螢幕後仍繼續播放
+
+- `Resources/AppInfo.plist` 加入 **`UIBackgroundModes = [audio]`**，與 `VoicePlayerController` 已有的 `AVAudioSession.Category.playback` 搭配，符合 iOS 原生背景音訊要求；這與 `remote-notification` **完全不同**，不代表恢復推播。
+- 同一個 `VoicePlayerController` 同時處理語音訊息（包括轉碼後的 Ogg/Opus）與 MP3/M4A/音檔，並加入 `MPNowPlayingInfoCenter` 顯示鎖定畫面播放資訊、`MPRemoteCommandCenter` 播放／暫停／拖動進度。
+- 不要求永遠保持 App 常駐；**僅針對已開始播放的音訊**，若使用者關閉附件播放器，仍依原有流程結束播放。
+
+### OC 打包
+
+由 GitHub Actions 雲端 macOS 拉此分支建置，不要求使用者自行操作 Mac；打包注入既有 Telegram API ID/Hash 到主 App 和分享 Extension，不要在公開提交中暴露 API Hash。請保留小白簽現有 Bundle ID 和簽署身份，直接覆蓋舊版。這次只提交程式碼及文件，**不執行本地回歸、防禦型測試，也不提供 IPA**，交由 OC 拉取編譯交付使用者。
