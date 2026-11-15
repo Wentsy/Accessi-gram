@@ -219,6 +219,7 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
     }
 
     private func installRemoteControls() {
+        UIApplication.shared.beginReceivingRemoteControlEvents()
         let commands = MPRemoteCommandCenter.shared()
         commands.playCommand.isEnabled = true
         commands.pauseCommand.isEnabled = true
@@ -261,6 +262,7 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
         ticker = nil
         player?.stop()
         player = nil
+        UIApplication.shared.endReceivingRemoteControlEvents()
         let commands = MPRemoteCommandCenter.shared()
         if let target = remotePlayTarget { commands.playCommand.removeTarget(target) }
         if let target = remotePauseTarget { commands.pauseCommand.removeTarget(target) }
