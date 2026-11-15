@@ -33,7 +33,12 @@ struct ChatScreen: View {
                 onMenu: { message in showMessageMenu(message) },
                 onReply: { message in thread.replyTo = message },
                 onMedia: { message in mediaMessage = message },
-                onBotMenu: { message in showBotMenu(message) }
+                onBotMenu: { message in showBotMenu(message) },
+                onOpenLink: { link in
+                    if let url = URL(string: link.address) {
+                        UIApplication.shared.open(url)
+                    }
+                }
             )
             if thread.loading && thread.messages.isEmpty {
                 ProgressView("載入訊息中")
