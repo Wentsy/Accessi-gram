@@ -750,8 +750,31 @@ final class TelegramService: ObservableObject {
         command("toggleChatIsMarkedAsUnread", ["chat_id": chatID, "is_marked_as_unread": true])
     }
 
-    func deleteChat(chatID: Int64) {
-        command("deleteChatHistory", ["chat_id": chatID, "remove_from_chat_list": true, "revoke": false])
+    func deleteChat(chatID: Int64, forEveryone: Bool) {
+        request("deleteChatHistory", [
+            "chat_id": chatID,
+            "remove_from_chat_list": true,
+            "revoke": forEveryone
+        ]) { [weak self] result in
+            if result.text("@type") == "error" {
+                self?.errorMessage = "刪除對話失敗：" + result.text("message")
+            } else {
+                self?.chatsByID.removeValue(forKey: chatID)
+                self?.threads.removeValue(forKey: chatID)
+                self?.publishChats()
+            }
+        }
+    }
+
+    func leaveConversation(chatID: Int64) {
+        request("leaveChat", ["chat_id": chatID]) { [weak self] result in
+            guard let self else { return }
+            if result.text("@type") == "error" {
+                self.errorMessage = "離開群組或頻道失敗：" + result.text("message")
+                return
+            }
+            self.deleteChat(chatID: chatID, forEveryone: false)
+        }
     }
 
     func search(_ query: String) {
