@@ -34,6 +34,7 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
     private var ticker: Timer?
     private var remotePlayTarget: Any?
     private var remotePauseTarget: Any?
+    private var remoteToggleTarget: Any?
     private var remoteSeekTarget: Any?
     private var rateIndex = 0
     private let rates: [Float] = [1.0, 1.5, 2.0]
@@ -144,6 +145,14 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
         else { resumePlayback() }
     }
 
+    /// VoiceOver two-finger double-tap (Magic Tap) on the audio player.
+    /// Return false while no audio is loaded so other system gestures can work.
+    override func accessibilityPerformMagicTap() -> Bool {
+        guard player != nil else { return false }
+        togglePlay()
+        return true
+    }
+
     private func resumePlayback() {
         guard let player else { return }
         if player.currentTime >= player.duration { player.currentTime = 0 }
@@ -213,6 +222,7 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
         let commands = MPRemoteCommandCenter.shared()
         commands.playCommand.isEnabled = true
         commands.pauseCommand.isEnabled = true
+        commands.togglePlayPauseCommand.isEnabled = true
         commands.changePlaybackPositionCommand.isEnabled = true
         remotePlayTarget = commands.playCommand.addTarget { [weak self] _ in
             Task { @MainActor in self?.resumePlayback() }
@@ -220,6 +230,12 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
         }
         remotePauseTarget = commands.pauseCommand.addTarget { [weak self] _ in
             Task { @MainActor in self?.pausePlayback() }
+            return .success
+        }
+        // Lock-screen VoiceOver Magic Tap is dispatched through the system
+        // media command center, not the app's UIViewController responder chain.
+        remoteToggleTarget = commands.togglePlayPauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.togglePlay() }
             return .success
         }
         remoteSeekTarget = commands.changePlaybackPositionCommand.addTarget { [weak self] event in
@@ -248,9 +264,11 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
         let commands = MPRemoteCommandCenter.shared()
         if let target = remotePlayTarget { commands.playCommand.removeTarget(target) }
         if let target = remotePauseTarget { commands.pauseCommand.removeTarget(target) }
+        if let target = remoteToggleTarget { commands.togglePlayPauseCommand.removeTarget(target) }
         if let target = remoteSeekTarget { commands.changePlaybackPositionCommand.removeTarget(target) }
         remotePlayTarget = nil
         remotePauseTarget = nil
+        remoteToggleTarget = nil
         remoteSeekTarget = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
