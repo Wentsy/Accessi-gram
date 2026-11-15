@@ -1,5 +1,6 @@
 import UIKit
 import AVFoundation
+import MediaPlayer
 import SwiftUI
 
 /// UIKit playback controls remain individually reachable via VoiceOver, even
@@ -31,6 +32,9 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
     private let rateButton = UIButton(type: .system)
     private var player: AVAudioPlayer?
     private var ticker: Timer?
+    private var remotePlayTarget: Any?
+    private var remotePauseTarget: Any?
+    private var remoteSeekTarget: Any?
     private var rateIndex = 0
     private let rates: [Float] = [1.0, 1.5, 2.0]
 
@@ -124,6 +128,7 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
                 slider.maximumValue = Float(max(audio.duration, 0.1))
                 updateTime()
                 audio.play()
+                installRemoteControls()
                 startTicker()
                 updateControls()
             } catch {
@@ -135,24 +140,33 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
     }
 
     @objc private func togglePlay() {
+        if player?.isPlaying == true { pausePlayback() }
+        else { resumePlayback() }
+    }
+
+    private func resumePlayback() {
         guard let player else { return }
-        if player.isPlaying { player.pause() }
-        else {
-            if player.currentTime >= player.duration { player.currentTime = 0 }
-            player.rate = rates[rateIndex]
-            player.play()
-        }
+        if player.currentTime >= player.duration { player.currentTime = 0 }
+        player.rate = rates[rateIndex]
+        player.play()
+        updateControls()
+    }
+
+    private func pausePlayback() {
+        player?.pause()
         updateControls()
     }
 
     @objc private func seek() {
         player?.currentTime = TimeInterval(slider.value)
         updateTime()
+        updateNowPlaying()
     }
 
     @objc private func nextRate() {
         rateIndex = (rateIndex + 1) % rates.count
         player?.rate = rates[rateIndex]
+        updateNowPlaying()
         rateButton.setTitle("播放速度 \(rates[rateIndex]) 倍", for: .normal)
         rateButton.accessibilityLabel = "播放速度 \(rates[rateIndex]) 倍"
         UIAccessibility.post(notification: .announcement, argument: rateButton.accessibilityLabel)
@@ -181,6 +195,42 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
         playButton.accessibilityLabel = playing ? "暫停語音" : "播放語音訊息"
         statusLabel.text = playing ? "正在播放" : "已暫停"
         statusLabel.accessibilityLabel = statusLabel.text
+        updateNowPlaying()
+    }
+
+    private func updateNowPlaying() {
+        guard let player else { return }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+            MPMediaItemPropertyTitle: descriptionText,
+            MPMediaItemPropertyArtist: "Accessi Gram",
+            MPMediaItemPropertyPlaybackDuration: player.duration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: player.currentTime,
+            MPNowPlayingInfoPropertyPlaybackRate: player.isPlaying ? Double(rates[rateIndex]) : 0.0
+        ]
+    }
+
+    private func installRemoteControls() {
+        let commands = MPRemoteCommandCenter.shared()
+        commands.playCommand.isEnabled = true
+        commands.pauseCommand.isEnabled = true
+        commands.changePlaybackPositionCommand.isEnabled = true
+        remotePlayTarget = commands.playCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.resumePlayback() }
+            return .success
+        }
+        remotePauseTarget = commands.pauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.pausePlayback() }
+            return .success
+        }
+        remoteSeekTarget = commands.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            Task { @MainActor in
+                self?.player?.currentTime = event.positionTime
+                self?.updateTime()
+                self?.updateNowPlaying()
+            }
+            return .success
+        }
     }
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -195,6 +245,14 @@ final class VoicePlayerController: UIViewController, AVAudioPlayerDelegate {
         ticker = nil
         player?.stop()
         player = nil
+        let commands = MPRemoteCommandCenter.shared()
+        if let target = remotePlayTarget { commands.playCommand.removeTarget(target) }
+        if let target = remotePauseTarget { commands.pauseCommand.removeTarget(target) }
+        if let target = remoteSeekTarget { commands.changePlaybackPositionCommand.removeTarget(target) }
+        remotePlayTarget = nil
+        remotePauseTarget = nil
+        remoteSeekTarget = nil
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
     override func viewDidDisappear(_ animated: Bool) {
