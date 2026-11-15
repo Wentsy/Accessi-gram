@@ -253,14 +253,24 @@ final class AccessibleConversationsController: UIViewController, UITableViewDele
             present(alert, animated: true)
             return
         }
+        if !chat.canDeleteOnlyForSelf && !chat.canDeleteForAllUsers {
+            let notice = UIAlertController(title: "無法刪除對話",
+                                           message: "Telegram 目前未允許刪除此對話紀錄。",
+                                           preferredStyle: .alert)
+            notice.addAction(UIAlertAction(title: "確定", style: .default))
+            present(notice, animated: true)
+            return
+        }
         let alert = UIAlertController(
             title: title,
             message: "選擇刪除範圍。此操作無法復原。",
             preferredStyle: .actionSheet
         )
-        alert.addAction(UIAlertAction(title: "僅為我刪除", style: .destructive) { [weak self] _ in
-            self?.service.deleteChat(chatID: chatID, forEveryone: false)
-        })
+        if chat.canDeleteOnlyForSelf {
+            alert.addAction(UIAlertAction(title: "僅為我刪除", style: .destructive) { [weak self] _ in
+                self?.service.deleteChat(chatID: chatID, forEveryone: false)
+            })
+        }
         if chat.canDeleteForAllUsers {
             alert.addAction(UIAlertAction(title: "為雙方刪除", style: .destructive) { [weak self] _ in
                 self?.service.deleteChat(chatID: chatID, forEveryone: true)
