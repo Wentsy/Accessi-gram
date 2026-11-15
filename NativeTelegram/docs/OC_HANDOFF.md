@@ -123,3 +123,14 @@ bash scripts/build.sh
 ### OC 打包
 
 由 GitHub Actions 雲端 macOS 拉此分支建置，不要求使用者自行操作 Mac；打包注入既有 Telegram API ID/Hash 到主 App 和分享 Extension，不要在公開提交中暴露 API Hash。請保留小白簽現有 Bundle ID 和簽署身份，直接覆蓋舊版。這次只提交程式碼及文件，**不執行本地回歸、防禦型測試，也不提供 IPA**，交由 OC 拉取編譯交付使用者。
+
+## 2026-11-15：VoiceOver 雙指雙擊（Magic Tap）播放／暫停音訊
+
+使用者已確認**未讀狀態問題已修好**，**背景音訊播放與訊息連結也已正常**。本次只新增語音／一般音訊的雙指雙擊播放暫停，不再更動任何已讀、對話、分享或訊息連結程式。
+
+- `VoicePlayerScreen.swift`：在 `VoicePlayerController.accessibilityPerformMagicTap()` 接住 VoiceOver「雙指雙擊」，只在音訊已載入時切換 `AVAudioPlayer` 播放／暫停；其他功能與倍速不變。
+- `AccessibleMediaSheet.swift`：播放器是原生附件視窗裡的子 controller；額外讓 `NativeMediaScreen` 和 `AccessibleMediaNavigationController` 把 Magic Tap 傳至子播放器，包含 VoiceOver 焦點在導覽列及關閉按鈕時。
+- `VoicePlayerScreen.swift`：現有 `playCommand`、`pauseCommand` 之外，補齊 `MPRemoteCommandCenter.togglePlayPauseCommand`，供 iOS 鎖定畫面／系統媒體操作播放暫停；播放期間開啟 remote-control event reception，關閉播放器時解除。現有 Now Playing、背景音訊 `UIBackgroundModes=audio`、進度、倍速與 Ogg/Opus 支援都保留。
+- `AccessibleHelp.swift` 使用指南更新魔術點按說明。**鎖定螢幕兩指雙擊須由 iOS VoiceOver／系統媒體控制派發；這次已完成 App 端命令接線，但尚未經使用者真機驗證，不能宣稱鎖屏手勢已經實測成功。**
+
+由 OC 用 GitHub Actions 雲端 macOS 拉 `feat/stable-chat-links-read-delete` 繼續打包，不需個人 Mac，也不需任何 APNs／App Groups entitlement。本次未執行 Xcode 回歸／防禦性測試。請保留已成功的檔名、跨 App 分享與登入資料，不要轉回失敗的背景推播分支。
