@@ -59,6 +59,11 @@ struct TelegramChat: Identifiable, Equatable {
     var title: String
     var order: Int64
     var unreadCount: Int
+    var isMarkedAsUnread: Bool
+    var lastMessageID: Int64
+    var canDeleteForAllUsers: Bool
+    var canDeleteOnlyForSelf: Bool
+    var isChannel: Bool
     var lastPreview: String
     var type: String
     var isPinned: Bool
@@ -68,6 +73,11 @@ struct TelegramChat: Identifiable, Equatable {
         id = raw.number("id")
         title = raw.text("title")
         unreadCount = Int(raw.number("unread_count"))
+        isMarkedAsUnread = raw.flag("is_marked_as_unread")
+        lastMessageID = raw.object("last_message").number("id")
+        canDeleteForAllUsers = raw.flag("can_be_deleted_for_all_users")
+        canDeleteOnlyForSelf = raw.flag("can_be_deleted_only_for_self")
+        isChannel = raw.object("type").flag("is_channel")
         let positions = raw.objects("positions")
         let main = positions.first {
             $0.object("list").text("@type") == "chatListMain" && $0.number("order") > 0
@@ -86,9 +96,57 @@ struct TelegramChat: Identifiable, Equatable {
         }
     }
 
+    var isGroupOrChannel: Bool {
+        type == "chatTypeBasicGroup" || type == "chatTypeSupergroup"
+    }
+
+    var removalTitle: String {
+        isGroupOrChannel ? (isChannel ? "離開頻道" : "退出群組") : "刪除對話"
+    }
+
     var spoken: String {
-        let count = unreadCount > 0 ? "，\(unreadCount) 則未讀" : ""
+        let count = unreadCount > 0 ? "，\(unreadCount) 則未讀" : (isMarkedAsUnread ? "，標記未讀" : "")
         return "\(title)\(count)，\(lastPreview)"
+    }
+}
+
+struct TelegramMessageLink: Equatable {
+    let title: String
+    let address: String
+    let isHidden: Bool
+
+    static func from(_ formatted: JSONObject) -> [TelegramMessageLink] {
+        let text = formatted.text("text")
+        let nsText = text as NSString
+        var links: [TelegramMessageLink] = []
+        for entity in formatted.objects("entities") {
+            let kind = entity.object("type").text("@type")
+            guard kind == "textEntityTypeUrl" || kind == "textEntityTypeTextUrl" else { continue }
+            let range = NSRange(location: Int(entity.number("offset")), length: Int(entity.number("length")))
+            guard range.length > 0, NSMaxRange(range) <= nsText.length else { continue }
+            let label = nsText.substring(with: range)
+            let target = kind == "textEntityTypeTextUrl"
+                ? entity.object("type").text("url") : label
+            let address = target.hasPrefix("www.") ? "https://" + target : target
+            guard let url = URL(string: address),
+                  url.scheme == "https" || url.scheme == "http",
+                  url.host != nil else { continue }
+            let link = TelegramMessageLink(title: label, address: address,
+                                           isHidden: kind == "textEntityTypeTextUrl")
+            if !links.contains(link) { links.append(link) }
+        }
+        // Some older messages have no TDLib URL entities; still expose plain URLs.
+        let detector = try! NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        for match in detector.matches(in: text, range: NSRange(location: 0, length: nsText.length)) {
+            guard let url = match.url,
+                  url.scheme == "https" || url.scheme == "http",
+                  !links.contains(where: { $0.address == url.absoluteString }) else { continue }
+            links.append(TelegramMessageLink(
+                title: nsText.substring(with: match.range),
+                address: url.absoluteString, isHidden: false
+            ))
+        }
+        return links
     }
 }
 
@@ -97,6 +155,7 @@ struct TelegramMessage: Identifiable, Equatable {
     let chatID: Int64
     var sender: String
     var body: String
+    var links: [TelegramMessageLink]
     let date: Date
     var fileID: Int
     var fileKind: String
@@ -109,7 +168,8 @@ struct TelegramMessage: Identifiable, Equatable {
     var spoken: String {
         let result = translated.map { "，翻譯：\($0)" } ?? ""
         let timestamp = Self.timestamp.string(from: date)
-        return "\(sender)，\(body)\(result)，\(timestamp)"
+        let linkHint = links.isEmpty ? "" : "，包含 \(links.count) 個連結，可使用轉輪動作開啟"
+        return "\(sender)，\(body)\(result)\(linkHint)，\(timestamp)"
     }
 
     static let timestamp: DateFormatter = {
@@ -122,6 +182,7 @@ struct TelegramMessage: Identifiable, Equatable {
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.id == rhs.id && lhs.sender == rhs.sender && lhs.body == rhs.body &&
+        lhs.links == rhs.links &&
         lhs.fileID == rhs.fileID && lhs.translated == rhs.translated &&
         lhs.buttons.map(\.id) == rhs.buttons.map(\.id)
     }
@@ -219,6 +280,8 @@ struct TelegramMessage: Identifiable, Equatable {
         }
         body = [prefix, caption].filter { !$0.isEmpty }.joined(separator: "，")
         if body.isEmpty { body = "空白訊息" }
+        let formatted = type == "messageText" ? content.object("text") : content.object("caption")
+        links = TelegramMessageLink.from(formatted)
 
         let markup = raw.object("reply_markup")
         let rows = markup["rows"] as? [[JSONObject]] ?? []
