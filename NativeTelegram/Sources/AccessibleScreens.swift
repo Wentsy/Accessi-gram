@@ -32,7 +32,8 @@ final class AccessibleChatCell: UITableViewCell {
 
     required init?(coder: NSCoder) { fatalError("Use init(style:reuseIdentifier:)") }
 
-    func display(_ chat: TelegramChat, service: TelegramService) {
+    func display(_ chat: TelegramChat, service: TelegramService,
+                 onRemove: @escaping () -> Void) {
         textLabel?.text = chat.title
         detailTextLabel?.text = chat.lastPreview
         accessibilityLabel = chat.spoken
@@ -49,6 +50,10 @@ final class AccessibleChatCell: UITableViewCell {
             },
             UIAccessibilityCustomAction(name: chat.isArchived ? "移回聊天" : "封存") { _ in
                 service.archiveChat(chatID: chat.id, value: !chat.isArchived)
+                return true
+            },
+            UIAccessibilityCustomAction(name: chat.removalTitle) { _ in
+                onRemove()
                 return true
             }
         ]
@@ -94,7 +99,11 @@ final class AccessibleConversationsController: UIViewController, UITableViewDele
 
         dataSource = UITableViewDiffableDataSource<Int, Int64>(tableView: table) { [weak self] table, path, chatID in
             let cell = table.dequeueReusableCell(withIdentifier: "chat", for: path) as! AccessibleChatCell
-            if let self, let chat = self.byID[chatID] { cell.display(chat, service: self.service) }
+            if let self, let chat = self.byID[chatID] {
+                cell.display(chat, service: self.service) { [weak self] in
+                    self?.presentRemoval(for: chatID)
+                }
+            }
             return cell
         }
         table.dataSource = dataSource
@@ -203,7 +212,9 @@ final class AccessibleConversationsController: UIViewController, UITableViewDele
             guard let id = dataSource.itemIdentifier(for: path),
                   let chat = byID[id],
                   let cell = table.cellForRow(at: path) as? AccessibleChatCell else { continue }
-            cell.display(chat, service: service)
+            cell.display(chat, service: service) { [weak self] in
+                self?.presentRemoval(for: id)
+            }
         }
     }
 
@@ -220,6 +231,60 @@ final class AccessibleConversationsController: UIViewController, UITableViewDele
         let chat = UIHostingController(rootView: ChatScreen(chatID: id))
         chat.title = byID[id]?.title ?? "對話"
         navigationController?.pushViewController(chat, animated: true)
+    }
+
+    /// Show the same destructive options through swipe gestures and the
+    /// VoiceOver "動作" rotor. Only offer remote deletion if TDLib permits it.
+    private func presentRemoval(for chatID: Int64) {
+        guard let chat = byID[chatID] else { return }
+        let title = chat.removalTitle + "：「" + chat.title + "」"
+        if chat.isGroupOrChannel {
+            let alert = UIAlertController(
+                title: title,
+                message: chat.isChannel
+                    ? "確認離開此頻道？離開後會從聊天列表移除。"
+                    : "確認退出此群組？退出後會從聊天列表移除。",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+            alert.addAction(UIAlertAction(title: chat.removalTitle, style: .destructive) { [weak self] _ in
+                self?.service.leaveConversation(chatID: chatID)
+            })
+            present(alert, animated: true)
+            return
+        }
+        let alert = UIAlertController(
+            title: title,
+            message: "選擇刪除範圍。此操作無法復原。",
+            preferredStyle: .actionSheet
+        )
+        alert.addAction(UIAlertAction(title: "僅為我刪除", style: .destructive) { [weak self] _ in
+            self?.service.deleteChat(chatID: chatID, forEveryone: false)
+        })
+        if chat.canDeleteForAllUsers {
+            alert.addAction(UIAlertAction(title: "為雙方刪除", style: .destructive) { [weak self] _ in
+                self?.service.deleteChat(chatID: chatID, forEveryone: true)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = table
+            popover.sourceRect = table.bounds
+        }
+        present(alert, animated: true)
+    }
+
+    func tableView(_ tableView: UITableView,
+                   trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard let chatID = dataSource.itemIdentifier(for: indexPath),
+              let chat = byID[chatID] else { return nil }
+        let action = UIContextualAction(style: .destructive, title: chat.removalTitle) { [weak self] _, _, done in
+            done(false)
+            self?.presentRemoval(for: chatID)
+        }
+        let configuration = UISwipeActionsConfiguration(actions: [action])
+        configuration.performsFirstActionWithFullSwipe = false
+        return configuration
     }
 
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt path: IndexPath) {
