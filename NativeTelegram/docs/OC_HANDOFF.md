@@ -134,3 +134,10 @@ bash scripts/build.sh
 - `AccessibleHelp.swift` 使用指南更新魔術點按說明。**鎖定螢幕兩指雙擊須由 iOS VoiceOver／系統媒體控制派發；這次已完成 App 端命令接線，但尚未經使用者真機驗證，不能宣稱鎖屏手勢已經實測成功。**
 
 由 OC 用 GitHub Actions 雲端 macOS 拉 `feat/stable-chat-links-read-delete` 繼續打包，不需個人 Mac，也不需任何 APNs／App Groups entitlement。本次未執行 Xcode 回歸／防禦性測試。請保留已成功的檔名、跨 App 分享與登入資料，不要轉回失敗的背景推播分支。
+
+## 2026-11-15：使用者確認目前版本穩定（最新穩定基準）
+
+- **使用者已完成真機測試**並明確回報「可以穩定使用、目前功能都正常」。此分支截至 `a540b40350ccf8dbc19024b25db5f802cd8f7d7e` 的功能組合列為新的穩定基準。
+- 已確認項目：Telegram 聊天與訊息已讀狀態、訊息內連結 VoiceOver 動作、聊天列表刪除／離開群組與頻道、語音／音檔背景及鎖定畫面播放、VoiceOver 雙指雙擊播放／暫停；原有登入、跨 App 分享、附件原檔名與檔案傳送維持正常。
+- **往後開發一律以 `feat/stable-chat-links-read-delete` 作為基準**；僅開新功能分支，未經使用者要求不要合併至 `main`，也不要把背景 APNs 推播實驗分支的程式重新帶入。
+- 現階段無需額外回歸、防禦性測試，OC 按使用者指示負責拉取及編譯；使用者有需要再個別回報問題。
