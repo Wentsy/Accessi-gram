@@ -28,7 +28,7 @@ final class AccessibleHelpController: UITableViewController {
             Topic(title: "照片、影片與檔案",
                   explanation: "訊息編輯框左邊依序是傳送照片或影片，以及傳送檔案或附件。iOS 18 會開啟原生檔案選取器，選好按「打開」會直接準備傳送。收到的一般檔案會使用 iOS 的 Quick Look 或分享功能開啟。"),
             Topic(title: "播放語音訊息",
-                  explanation: "對語音訊息點兩下就能開啟播放器並自動開始播放，支援 Telegram 的 OGG Opus 語音。一般 MP3、M4A 等音訊檔也使用同一播放器。播放期間可鎖定 iPhone 螢幕持續收聽，並可從鎖定畫面播放、暫停或調整進度。關閉附件播放器才會結束播放。")
+                  explanation: "對語音訊息點兩下就能開啟播放器並自動開始播放，支援 Telegram 的 OGG Opus 語音。一般 MP3、M4A 等音訊檔也使用同一播放器。VoiceOver 雙指雙擊可切換播放與暫停，並支援鎖定畫面的系統播放／暫停媒體指令。播放期間可鎖定 iPhone 螢幕持續收聽，並可從鎖定畫面播放、暫停或調整進度。關閉附件播放器才會結束播放。")
         ]),
         ("訊息操作", [
             Topic(title: "訊息上下滑動",
