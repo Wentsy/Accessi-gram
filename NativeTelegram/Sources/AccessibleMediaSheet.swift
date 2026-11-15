@@ -13,10 +13,18 @@ struct AccessibleMediaSheet: UIViewControllerRepresentable {
         let screen = NativeMediaScreen(message: message, service: service) {
             dismiss()
         }
-        return UINavigationController(rootViewController: screen)
+        return AccessibleMediaNavigationController(rootViewController: screen)
     }
 
     func updateUIViewController(_ controller: UINavigationController, context: Context) {}
+}
+
+/// Forward Magic Tap from a focused navigation-bar button to the player.
+@MainActor
+final class AccessibleMediaNavigationController: UINavigationController {
+    override func accessibilityPerformMagicTap() -> Bool {
+        (topViewController as? NativeMediaScreen)?.accessibilityPerformMagicTap() ?? false
+    }
 }
 
 @MainActor
@@ -26,6 +34,7 @@ final class NativeMediaScreen: UIViewController {
     private let onClose: () -> Void
     private let status = UILabel()
     private var localURL: URL?
+    private weak var voicePlayer: VoicePlayerController?
 
     init(message: TelegramMessage, service: TelegramService,
          onClose: @escaping () -> Void) {
@@ -90,6 +99,7 @@ final class NativeMediaScreen: UIViewController {
         switch message.fileKind {
         case "voice", "audio":
             let screen = VoicePlayerController()
+            voicePlayer = screen
             screen.configure(url: url, description: message.body)
             content = screen
         case "video":
@@ -138,6 +148,10 @@ final class NativeMediaScreen: UIViewController {
         share.accessibilityLabel = "分享或儲存附件"
         navigationItem.rightBarButtonItem = share
         UIAccessibility.post(notification: .screenChanged, argument: content.view)
+    }
+
+    override func accessibilityPerformMagicTap() -> Bool {
+        voicePlayer?.accessibilityPerformMagicTap() ?? false
     }
 
     @objc private func close() {
