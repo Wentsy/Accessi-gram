@@ -199,6 +199,7 @@ final class TelegramService: ObservableObject {
                 if chat.lastPreview.isEmpty {
                     chat.lastPreview = content.text("@type").replacingOccurrences(of: "message", with: "")
                 }
+                chat.lastMessageID = json.object("last_message").number("id")
                 if let position = json.objects("positions").first(where: {
                     $0.object("list").text("@type") == "chatListMain" || $0.object("list").text("@type") == "chatListArchive"
                 }) {
@@ -211,11 +212,17 @@ final class TelegramService: ObservableObject {
         case "updateChatReadInbox":
             chatsByID[json.number("chat_id")]?.unreadCount = Int(json.number("unread_count"))
             publishChats()
+        case "updateChatIsMarkedAsUnread":
+            chatsByID[json.number("chat_id")]?.isMarkedAsUnread = json.flag("is_marked_as_unread")
+            publishChats()
         case "updateUser":
             storeUser(json.object("user"))
         case "updateNewMessage":
             let message = json.object("message")
             receive(message)
+            if thread(message.number("chat_id")).hasOpened && !message.flag("is_outgoing") {
+                markChatRead(message.number("chat_id"), through: message.number("id"))
+            }
             vibrateIfIncoming(message)
         case "updateMessageSendSucceeded":
             let message = json.object("message")
@@ -468,6 +475,7 @@ final class TelegramService: ObservableObject {
             model.hasOpened = true
             command("openChat", ["chat_id": id])
         }
+        markChatRead(id)
         if !model.isInitialized {
             model.isInitialized = true
             history(id, before: 0)
@@ -477,8 +485,40 @@ final class TelegramService: ObservableObject {
     func close(_ id: Int64) {
         let model = thread(id)
         if model.hasOpened {
+            markChatRead(id)
             model.hasOpened = false
             command("closeChat", ["chat_id": id])
+        }
+    }
+
+    /// Opening a chat must clear both the server's unread count and the
+    /// explicit "mark as unread" flag, including when returning to a cached
+    /// timeline without fetching a first page again.
+    private func markChatRead(_ id: Int64, through messageID: Int64 = 0) {
+        guard id != 0 else { return }
+        if chatsByID[id]?.isMarkedAsUnread == true {
+            request("toggleChatIsMarkedAsUnread",
+                    ["chat_id": id, "is_marked_as_unread": false]) { [weak self] result in
+                if result.text("@type") == "error" {
+                    self?.errorMessage = result.text("message")
+                } else {
+                    self?.chatsByID[id]?.isMarkedAsUnread = false
+                    self?.publishChats()
+                }
+            }
+        }
+        let latest = max(messageID,
+                         chatsByID[id]?.lastMessageID ?? 0,
+                         threads[id]?.messages.last?.id ?? 0)
+        guard latest > 0 else { return }
+        request("viewMessages", ["chat_id": id, "message_ids": [latest],
+                                 "force_read": true]) { [weak self] response in
+            if response.text("@type") == "error" {
+                self?.errorMessage = response.text("message")
+            } else {
+                self?.chatsByID[id]?.unreadCount = 0
+                self?.publishChats()
+            }
         }
     }
 
@@ -508,9 +548,8 @@ final class TelegramService: ObservableObject {
             }
             model.paginationStallCount = (before > 0 && priorOldest == model.messages.first?.id)
                 ? model.paginationStallCount + 1 : 0
-            if before == 0, let last = model.messages.last {
-                self.command("viewMessages", ["chat_id": id,
-                                              "message_ids": [last.id], "force_read": true])
+            if before == 0, model.hasOpened {
+                self.markChatRead(id)
             }
         }
     }
