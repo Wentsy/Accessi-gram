@@ -9,10 +9,12 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
     let onReply: (TelegramMessage) -> Void
     let onMedia: (TelegramMessage) -> Void
     let onBotMenu: (TelegramMessage) -> Void
+    let onOpenLink: (TelegramMessageLink) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(thread: thread, service: service, onMenu: onMenu,
-                    onReply: onReply, onMedia: onMedia, onBotMenu: onBotMenu)
+                    onReply: onReply, onMedia: onMedia, onBotMenu: onBotMenu,
+                    onOpenLink: onOpenLink)
     }
 
     func makeUIView(context: Context) -> PagingTableView {
@@ -38,6 +40,7 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
         context.coordinator.onReply = onReply
         context.coordinator.onMedia = onMedia
         context.coordinator.onBotMenu = onBotMenu
+        context.coordinator.onOpenLink = onOpenLink
         context.coordinator.apply(thread.messages, to: table)
     }
 
@@ -51,18 +54,21 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
         var onReply: (TelegramMessage) -> Void
         var onMedia: (TelegramMessage) -> Void
         var onBotMenu: (TelegramMessage) -> Void
+        var onOpenLink: (TelegramMessageLink) -> Void
 
         init(thread: MessageThread, service: TelegramService,
              onMenu: @escaping (TelegramMessage) -> Void,
              onReply: @escaping (TelegramMessage) -> Void,
              onMedia: @escaping (TelegramMessage) -> Void,
-             onBotMenu: @escaping (TelegramMessage) -> Void) {
+             onBotMenu: @escaping (TelegramMessage) -> Void,
+             onOpenLink: @escaping (TelegramMessageLink) -> Void) {
             self.thread = thread
             self.service = service
             self.onMenu = onMenu
             self.onReply = onReply
             self.onMedia = onMedia
             self.onBotMenu = onBotMenu
+            self.onOpenLink = onOpenLink
         }
 
         func loadOlder() { service.older(thread.chatID) }
@@ -106,6 +112,8 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
                 self?.onBotMenu(copy)
             } onDelete: { [weak self] in
                 self?.service.delete(copy)
+            } onOpenLink: { [weak self] link in
+                self?.onOpenLink(link)
             }
         }
 
@@ -223,7 +231,8 @@ final class MessageRow: UITableViewCell {
         onTranslate: @escaping () -> Void,
         onReply: @escaping () -> Void,
         onBot: @escaping () -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        onOpenLink: @escaping (TelegramMessageLink) -> Void
     ) {
         content.text = "\(message.sender)\n\(message.body)\n\(TelegramMessage.timestamp.string(from: message.date))"
         accessibilityLabel = message.spoken
@@ -245,6 +254,12 @@ final class MessageRow: UITableViewCell {
             },
             UIAccessibilityCustomAction(name: "更多操作") { _ in onActivate(); return true }
         ]
+        for link in message.links {
+            actions.append(UIAccessibilityCustomAction(name: "開啟連結，\(link.title)") { _ in
+                onOpenLink(link)
+                return true
+            })
+        }
         if message.fileID > 0 {
             let name = message.fileKind == "voice" || message.fileKind == "audio"
                 ? "播放語音訊息" : "開啟附件"
