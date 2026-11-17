@@ -2,6 +2,18 @@ import UIKit
 import Social
 import UniformTypeIdentifiers
 
+private enum ShareImportError: LocalizedError {
+    case imageUnavailable
+    case invalidFile
+
+    var errorDescription: String? {
+        switch self {
+        case .imageUnavailable: return "截圖圖片無法讀取，請從截圖預覽重新分享"
+        case .invalidFile: return "分享來源沒有提供有效的附件資料"
+        }
+    }
+}
+
 /// A real Share Extension, rather than an URL handler that merely opens the
 /// app. The system hosts a caption editor and contact/group picker right here.
 final class ShareViewController: SLComposeServiceViewController {
@@ -35,11 +47,104 @@ final class ShareViewController: SLComposeServiceViewController {
         return [item]
     }
 
+    /// iOS screenshot editor can supply a PNG as Data, UIImage, an ephemeral
+    /// file URL, or several representations at once. The older implementation
+    /// force-cast the provider result and could terminate the extension before
+    /// its failure alert appeared.
+    private func loadScreenshot(_ provider: NSItemProvider, draftID: String,
+                                completion: @escaping (Result<ShareAttachment, Error>) -> Void) {
+        let imageTypes = [UTType.png.identifier, UTType.jpeg.identifier,
+                          UTType.heic.identifier, UTType.image.identifier]
+        let type = imageTypes.first(where: { provider.hasItemConformingToTypeIdentifier($0) })
+            ?? provider.registeredTypeIdentifiers.first(where: {
+                UTType($0)?.conforms(to: .image) == true
+            }) ?? UTType.image.identifier
+
+        func stage(_ bytes: Data, typeIdentifier: String) {
+            do {
+                // Keep original PNG bytes for screenshot fidelity and avoid
+                // throwing a large full-page screenshot through JPEG encoding.
+                let fileType = UTType(typeIdentifier)
+                let name: String
+                let savedData: Data
+                if fileType?.conforms(to: .png) == true {
+                    name = "截圖.png"
+                    savedData = bytes
+                } else if fileType?.conforms(to: .jpeg) == true {
+                    name = "分享圖片.jpg"
+                    savedData = bytes
+                } else if fileType?.conforms(to: .heic) == true {
+                    name = "分享圖片.heic"
+                    savedData = bytes
+                } else if let image = UIImage(data: bytes), let png = image.pngData() {
+                    name = "截圖.png"
+                    savedData = png
+                } else {
+                    throw ShareImportError.imageUnavailable
+                }
+                let temporary = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                try FileManager.default.createDirectory(at: temporary,
+                                                        withIntermediateDirectories: true)
+                let source = temporary.appendingPathComponent(name)
+                try savedData.write(to: source, options: .atomic)
+                let attachment = try ShareMailbox.stageFile(source, name: name, id: draftID)
+                try FileManager.default.removeItem(at: temporary)
+                completion(.success(attachment))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+
+        func loadAsObject() {
+            if provider.canLoadObject(ofClass: UIImage.self) {
+                _ = provider.loadObject(ofClass: UIImage.self) { image, error in
+                    if let image = image as? UIImage, let png = image.pngData() {
+                        stage(png, typeIdentifier: UTType.png.identifier)
+                    } else {
+                        loadAsItem()
+                    }
+                }
+            } else {
+                loadAsItem()
+            }
+        }
+
+        func loadAsItem() {
+            provider.loadItem(forTypeIdentifier: type, options: nil) { item, error in
+                if let image = item as? UIImage, let data = image.pngData() {
+                    stage(data, typeIdentifier: UTType.png.identifier)
+                } else if let data = item as? Data {
+                    stage(data, typeIdentifier: type)
+                } else if let url = item as? URL, url.isFileURL {
+                    do {
+                        let attachment = try ShareMailbox.stageFile(
+                            url, name: url.lastPathComponent, id: draftID
+                        )
+                        completion(.success(attachment))
+                    } catch {
+                        completion(.failure(error))
+                    }
+                } else {
+                    completion(.failure(error ?? ShareImportError.imageUnavailable))
+                }
+            }
+        }
+
+        _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, error in
+            if let data, !data.isEmpty {
+                stage(data, typeIdentifier: type)
+            } else {
+                loadAsObject()
+            }
+        }
+    }
+
     override func didSelectPost() {
         guard let recipient else { return }
         let draftID = UUID().uuidString
-        let itemProviders = (extensionContext?.inputItems as? [NSExtensionItem] ?? [])
-            .flatMap { $0.attachments ?? [] }
+        let input = (extensionContext?.inputItems as? [NSExtensionItem] ?? [])
+        let itemProviders = input.flatMap { $0.attachments ?? [] }
         let group = DispatchGroup()
         let lock = NSLock()
         var attachments: [ShareAttachment] = []
@@ -47,75 +152,85 @@ final class ShareViewController: SLComposeServiceViewController {
         var errors: [String] = []
 
         for provider in itemProviders {
-            if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) &&
-                !provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                group.enter()
+            group.enter()
+            let finished: (Result<ShareAttachment, Error>) -> Void = { result in
+                lock.lock()
+                switch result {
+                case .success(let attachment): attachments.append(attachment)
+                case .failure(let error): errors.append(error.localizedDescription)
+                }
+                lock.unlock()
+                group.leave()
+            }
+
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) {
+                    item, error in
+                    if let url = item as? URL, url.isFileURL {
+                        do {
+                            let accessed = url.startAccessingSecurityScopedResource()
+                            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                            finished(.success(try ShareMailbox.stageFile(
+                                url, name: url.lastPathComponent, id: draftID
+                            )))
+                        } catch {
+                            finished(.failure(error))
+                        }
+                    } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                        // Screenshot preview may advertise fileURL even when it
+                        // actually provides a transient in-memory screenshot.
+                        loadScreenshot(provider, draftID: draftID, completion: finished)
+                    } else {
+                        finished(.failure(error ?? ShareImportError.invalidFile))
+                    }
+                }
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                loadScreenshot(provider, draftID: draftID, completion: finished)
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
                 provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) {
                     item, error in
                     lock.lock()
-                    if let url = item as? URL { texts.append(url.absoluteString) }
-                    else if let error { errors.append(error.localizedDescription) }
+                    if let url = item as? URL {
+                        texts.append(url.absoluteString)
+                    } else if let url = item as? String {
+                        texts.append(url)
+                    } else {
+                        errors.append((error ?? ShareImportError.invalidFile).localizedDescription)
+                    }
                     lock.unlock()
-                    group.leave()
-                }
-            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) &&
-                        !provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                group.enter()
-                _ = provider.loadObject(ofClass: UIImage.self) { image, error in
-                    do {
-                        let image = image as! UIImage
-                        let temporary = FileManager.default.temporaryDirectory
-                            .appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
-                        try image.jpegData(compressionQuality: 0.82)!.write(to: temporary)
-                        let saved = try ShareMailbox.stageFile(temporary, name: "分享圖片.jpg", id: draftID)
-                        lock.lock(); attachments.append(saved); lock.unlock()
-                    } catch {
-                        lock.lock(); errors.append(error.localizedDescription); lock.unlock()
-                    }
-                    group.leave()
-                }
-            } else if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                group.enter()
-                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) {
-                    item, error in
-                    do {
-                        let url = item as! URL
-                        let security = url.startAccessingSecurityScopedResource()
-                        defer { if security { url.stopAccessingSecurityScopedResource() } }
-                        let saved = try ShareMailbox.stageFile(url, name: url.lastPathComponent, id: draftID)
-                        lock.lock(); attachments.append(saved); lock.unlock()
-                    } catch {
-                        lock.lock(); errors.append(error.localizedDescription); lock.unlock()
-                    }
                     group.leave()
                 }
             } else if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
-                group.enter()
                 provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) {
                     item, error in
                     lock.lock()
-                    if let content = item as? String { texts.append(content) }
-                    else if let data = item as? Data, let content = String(data: data, encoding: .utf8) {
+                    if let content = item as? String {
                         texts.append(content)
-                    } else if let error { errors.append(error.localizedDescription) }
+                    } else if let data = item as? Data,
+                              let content = String(data: data, encoding: .utf8) {
+                        texts.append(content)
+                    } else {
+                        errors.append((error ?? ShareImportError.invalidFile).localizedDescription)
+                    }
                     lock.unlock()
                     group.leave()
                 }
-            } else if let selectedType = provider.registeredTypeIdentifiers.first(where: {
+            } else if let selectedType = provider.registeredTypeIdentifiers.first {
                 $0 != UTType.plainText.identifier && $0 != UTType.url.identifier
-            }) {
-                group.enter()
+            } {
                 provider.loadFileRepresentation(forTypeIdentifier: selectedType) {
                     url, error in
                     do {
-                        guard let url else { throw error ?? CocoaError(.fileReadUnknown) }
-                        let saved = try ShareMailbox.stageFile(url, name: url.lastPathComponent, id: draftID)
-                        lock.lock(); attachments.append(saved); lock.unlock()
+                        guard let url else { throw error ?? ShareImportError.invalidFile }
+                        finished(.success(try ShareMailbox.stageFile(
+                            url, name: url.lastPathComponent, id: draftID
+                        )))
                     } catch {
-                        lock.lock(); errors.append(error.localizedDescription); lock.unlock()
+                        finished(.failure(error))
                     }
-                    group.leave()
                 }
+            } else {
+                finished(.failure(ShareImportError.invalidFile))
             }
         }
 
@@ -127,6 +242,10 @@ final class ShareViewController: SLComposeServiceViewController {
             let caption = ([self.contentText ?? ""] + texts)
                 .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 .joined(separator: "\n")
+            guard !attachments.isEmpty || !caption.isEmpty else {
+                self.showFailure("沒有取得可傳送的截圖或文字。請保留截圖編輯畫面並重新分享。")
+                return
+            }
             let pending = PendingShare(
                 id: draftID, target: recipient, caption: caption, attachments: attachments
             )
