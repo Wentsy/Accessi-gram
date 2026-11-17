@@ -159,3 +159,22 @@ bash scripts/build.sh
 ### 交付
 
 OC 從 `fix/screenshot-share-extension` 拉取編譯並在 GitHub Actions 雲端 macOS 產出 unsigned IPA，再由既有小白簽覆蓋安裝。維持 `org.accessigram.native`、主 App 與 Share Extension 獨立 TDLib 登入及 API 配置，**不要刪掉 App／清除 Keychain 或資料庫**。本輪未執行本地 Xcode 回歸／防禦型測試，使用者負責測試截圖預覽分享；未實測成功前不合併 `main`。
+
+## 2026-11-17 — 截圖預覽分享第二輪修正（以 OC 已能編譯版本為基準）
+
+使用者在 OC 代為修正 Swift 語法並重編後，截圖直接分享顯示「讀取分享內容失敗：截圖圖片無法讀取，請從截圖預覽重新分享」。另外，一般分享的說明文字明明顯示「選填」，但無文字時按鈕無法點；即使先輸入文字，再選接收對象，返回分享畫面後仍須在編輯框任意輸入／刪字才能按傳送。
+
+### 已直接改動 `ShareExtension/ShareViewController.swift`
+
+- **保留 OC 的編譯修正**：從已有 OC 提交 `debbc49bf1e9e0895902ff75c641b45de86b3756` 的 `fix/screenshot-share-extension` 繼續修改；不從舊基準覆蓋。OC 曾修正 closure `self.loadScreenshot` 和 `.first(where: {...})` 兩處錯誤。
+- **真正依來源提供型態讀截圖**：先取 `NSItemProvider.registeredTypeIdentifiers` 中實際存在的圖片型態，不再因 `hasItemConformingToTypeIdentifier(public.png)` 就假設 provider 真能提供 PNG。每種型態優先 `loadItem` 直接解出 `UIImage`，再依序嘗試 `Data`、檔案 representation；最後才用 `loadObject(UIImage)`。這是專門針對截圖預覽可能提供 `public.image`/`UIImage`（非 Data／檔案 URL）的情況。
+- **準確保留圖片格式**：透過 ImageIO `CGImageSourceGetType` 從內容辨認 PNG、JPEG、HEIC、WebP，避免相信來源宣稱 UTI；不認得時才將有效 `UIImage` 轉成 PNG。寫入沙盒檔案之後，仍沿用正常分享已驗證可用的 `ShareMailbox.stageFile`。
+- **檔案 URL 失效時走圖片備援**：截圖預覽可能提供短暫檔案 URL，若直接複製失敗、又可提供圖片，就改試圖片 representation，不立即放棄。
+- **失敗訊息更有價值**：截圖提供的所有型態均無法載入時，顯示 `registeredTypeIdentifiers` 作為診斷依據；不再只有「請重新分享」而沒法排查。無附件又無內容仍禁止送出。
+- **選填內容真正選填**：`isContentValid` 在已選接收對象且有來源附件時允許空說明；純文字分享需要實際內容。選擇接收對象後**同時**執行 `reloadConfigurationItems()` 和 `validateContent()`；返回分享畫面再驗證一次，讓 iOS 更新原生傳送按鈕，免再輸入／刪字。
+
+### 交接與測試責任
+
+- 最新程式提交：`88306844458313a723ae568187b5c9e6333ca5f8`（本文件提交不改 Swift）。分支 `fix/screenshot-share-extension`；**不合併 `main`**，維持先前穩定基準，使用者真機再判斷截圖來源是否可讀。
+- OC 請從這個分支拉取，用 GitHub Actions 進行編譯，保留 Share Extension 的獨立 Telegram 登入、注入 API ID/Hash、原始分享檔名、主 App 登入／聊天／連結／鎖屏播放；採小白簽覆蓋安裝，不刪 App、不清除資料。
+- 未進行回歸／防禦測試或模擬器測試；目前是實作完成，**不宣稱截圖直接分享已經真機驗證成功**。若還失敗，請回報新的錯誤訊息中「提供的圖片型態」部分，便能按實際 iOS 來源對應調整。
