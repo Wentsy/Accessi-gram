@@ -179,13 +179,13 @@ final class ShareViewController: SLComposeServiceViewController {
                     } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
                         // Screenshot preview may advertise fileURL even when it
                         // actually provides a transient in-memory screenshot.
-                        loadScreenshot(provider, draftID: draftID, completion: finished)
+                        self.loadScreenshot(provider, draftID: draftID, completion: finished)
                     } else {
                         finished(.failure(error ?? ShareImportError.invalidFile))
                     }
                 }
             } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                loadScreenshot(provider, draftID: draftID, completion: finished)
+                self.loadScreenshot(provider, draftID: draftID, completion: finished)
             } else if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
                 provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) {
                     item, error in
@@ -215,9 +215,9 @@ final class ShareViewController: SLComposeServiceViewController {
                     lock.unlock()
                     group.leave()
                 }
-            } else if let selectedType = provider.registeredTypeIdentifiers.first {
+            } else if let selectedType = provider.registeredTypeIdentifiers.first(where: {
                 $0 != UTType.plainText.identifier && $0 != UTType.url.identifier
-            } {
+            }) {
                 provider.loadFileRepresentation(forTypeIdentifier: selectedType) {
                     url, error in
                     do {
