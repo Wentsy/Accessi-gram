@@ -1,14 +1,15 @@
 import UIKit
 import Social
 import UniformTypeIdentifiers
+import ImageIO
 
 private enum ShareImportError: LocalizedError {
-    case imageUnavailable
+    case imageUnavailable(String)
     case invalidFile
 
     var errorDescription: String? {
         switch self {
-        case .imageUnavailable: return "截圖圖片無法讀取，請從截圖預覽重新分享"
+        case .imageUnavailable(let types): return "截圖圖片無法讀取。提供的圖片型態：\(types)。請將這段錯誤提供給開發者。"
         case .invalidFile: return "分享來源沒有提供有效的附件資料"
         }
     }
@@ -30,7 +31,18 @@ final class ShareViewController: SLComposeServiceViewController {
         navigationItem.rightBarButtonItem?.accessibilityLabel = "確認分享"
     }
 
-    override func isContentValid() -> Bool { recipient != nil }
+    override func isContentValid() -> Bool {
+        guard recipient != nil else { return false }
+        let hasAttachments = (extensionContext?.inputItems as? [NSExtensionItem] ?? [])
+            .contains { !($0.attachments ?? []).isEmpty }
+        return hasAttachments || !(contentText ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        validateContent()
+    }
 
     override func configurationItems() -> [Any]! {
         let item = SLComposeSheetConfigurationItem()!
@@ -39,105 +51,137 @@ final class ShareViewController: SLComposeServiceViewController {
         item.tapHandler = { [weak self] in
             guard let self else { return }
             self.pushConfigurationViewController(ShareRecipientPicker(sender: self.directSender) { [weak self] chosen in
-                self?.recipient = chosen
-                self?.reloadConfigurationItems()
-                self?.popConfigurationViewController()
+                guard let self else { return }
+                self.recipient = chosen
+                self.reloadConfigurationItems()
+                self.popConfigurationViewController()
+                self.validateContent()
             })
         }
         return [item]
     }
 
-    /// iOS screenshot editor can supply a PNG as Data, UIImage, an ephemeral
-    /// file URL, or several representations at once. The older implementation
-    /// force-cast the provider result and could terminate the extension before
-    /// its failure alert appeared.
+    /// A screenshot shared directly from the iOS editor often registers
+    /// public.image and returns UIImage from loadItem, not PNG Data or a file.
+    /// Request exact registered identifiers in order instead of assuming that
+    /// a conforming public.png representation actually exists.
     private func loadScreenshot(_ provider: NSItemProvider, draftID: String,
                                 completion: @escaping (Result<ShareAttachment, Error>) -> Void) {
-        let imageTypes = [UTType.png.identifier, UTType.jpeg.identifier,
-                          UTType.heic.identifier, UTType.image.identifier]
-        let type = imageTypes.first(where: { provider.hasItemConformingToTypeIdentifier($0) })
-            ?? provider.registeredTypeIdentifiers.first(where: {
-                UTType($0)?.conforms(to: .image) == true
-            }) ?? UTType.image.identifier
+        var types = provider.registeredTypeIdentifiers.filter { identifier in
+            identifier == UTType.image.identifier
+                || UTType(identifier)?.conforms(to: .image) == true
+        }
+        if types.isEmpty {
+            types = provider.registeredTypeIdentifiers.filter {
+                $0 != UTType.fileURL.identifier
+                    && $0 != UTType.url.identifier
+                    && $0 != UTType.plainText.identifier
+            }
+        }
+        if !types.contains(UTType.image.identifier) {
+            types.append(UTType.image.identifier)
+        }
 
-        func stage(_ bytes: Data, typeIdentifier: String) {
+        // True means we have already called completion; false means that
+        // representation was unavailable and the next one should be tried.
+        func stageData(_ bytes: Data) -> Bool {
+            guard !bytes.isEmpty, let image = UIImage(data: bytes) else { return false }
+            let source = CGImageSourceCreateWithData(bytes as CFData, nil)
+            let imageUTI = source.flatMap { CGImageSourceGetType($0) }
+            let actualType: UTType? = imageUTI.flatMap { UTType($0 as String) }
+            let name: String
+            let content: Data
+            if actualType?.conforms(to: .png) == true {
+                name = "截圖.png"
+                content = bytes
+            } else if actualType?.conforms(to: .jpeg) == true {
+                name = "分享圖片.jpg"
+                content = bytes
+            } else if actualType?.conforms(to: .heic) == true {
+                name = "分享圖片.heic"
+                content = bytes
+            } else if actualType?.conforms(to: .webP) == true {
+                name = "分享圖片.webp"
+                content = bytes
+            } else if let png = image.pngData() {
+                name = "截圖.png"
+                content = png
+            } else {
+                return false
+            }
             do {
-                // Keep original PNG bytes for screenshot fidelity and avoid
-                // throwing a large full-page screenshot through JPEG encoding.
-                let fileType = UTType(typeIdentifier)
-                let name: String
-                let savedData: Data
-                if fileType?.conforms(to: .png) == true {
-                    name = "截圖.png"
-                    savedData = bytes
-                } else if fileType?.conforms(to: .jpeg) == true {
-                    name = "分享圖片.jpg"
-                    savedData = bytes
-                } else if fileType?.conforms(to: .heic) == true {
-                    name = "分享圖片.heic"
-                    savedData = bytes
-                } else if let image = UIImage(data: bytes), let png = image.pngData() {
-                    name = "截圖.png"
-                    savedData = png
-                } else {
-                    throw ShareImportError.imageUnavailable
-                }
                 let temporary = FileManager.default.temporaryDirectory
                     .appendingPathComponent(UUID().uuidString, isDirectory: true)
                 try FileManager.default.createDirectory(at: temporary,
                                                         withIntermediateDirectories: true)
-                let source = temporary.appendingPathComponent(name)
-                try savedData.write(to: source, options: .atomic)
-                let attachment = try ShareMailbox.stageFile(source, name: name, id: draftID)
+                let file = temporary.appendingPathComponent(name)
+                try content.write(to: file, options: .atomic)
+                let attachment = try ShareMailbox.stageFile(file, name: name, id: draftID)
                 try FileManager.default.removeItem(at: temporary)
                 completion(.success(attachment))
             } catch {
                 completion(.failure(error))
             }
+            return true
         }
 
-        func loadAsObject() {
-            if provider.canLoadObject(ofClass: UIImage.self) {
-                _ = provider.loadObject(ofClass: UIImage.self) { image, error in
-                    if let image = image as? UIImage, let png = image.pngData() {
-                        stage(png, typeIdentifier: UTType.png.identifier)
-                    } else {
-                        loadAsItem()
-                    }
-                }
-            } else {
-                loadAsItem()
-            }
+        func stageURL(_ url: URL) -> Bool {
+            guard url.isFileURL else { return false }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { return false }
+            return stageData(data)
         }
 
-        func loadAsItem() {
-            provider.loadItem(forTypeIdentifier: type, options: nil) { item, error in
-                if let image = item as? UIImage, let data = image.pngData() {
-                    stage(data, typeIdentifier: UTType.png.identifier)
-                } else if let data = item as? Data {
-                    stage(data, typeIdentifier: type)
-                } else if let url = item as? URL, url.isFileURL {
-                    do {
-                        let attachment = try ShareMailbox.stageFile(
-                            url, name: url.lastPathComponent, id: draftID
-                        )
-                        completion(.success(attachment))
-                    } catch {
-                        completion(.failure(error))
+        func nextType(_ index: Int) {
+            if index >= types.count {
+                // Some screenshot providers only vend UIImage through their
+                // object registration, with no NSData or file representation.
+                if provider.canLoadObject(ofClass: UIImage.self) {
+                    _ = provider.loadObject(ofClass: UIImage.self) { object, _ in
+                        if let image = object as? UIImage,
+                           let data = image.pngData(), stageData(data) {
+                            return
+                        }
+                        completion(.failure(ShareImportError.imageUnavailable(
+                            provider.registeredTypeIdentifiers.joined(separator: ", ")
+                        )))
                     }
                 } else {
-                    completion(.failure(error ?? ShareImportError.imageUnavailable))
+                    completion(.failure(ShareImportError.imageUnavailable(
+                        provider.registeredTypeIdentifiers.joined(separator: ", ")
+                    )))
+                }
+                return
+            }
+            let type = types[index]
+            // loadItem handles UIImage from the screenshot editor directly.
+            provider.loadItem(forTypeIdentifier: type, options: nil) { item, _ in
+                if let image = item as? UIImage,
+                   let data = image.pngData(), stageData(data) {
+                    return
+                }
+                if let data = item as? Data, stageData(data) {
+                    return
+                }
+                if let url = item as? URL, stageURL(url) {
+                    return
+                }
+                if let path = item as? String,
+                   let url = URL(string: path), stageURL(url) {
+                    return
+                }
+                _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+                    if let data, stageData(data) { return }
+                    _ = provider.loadFileRepresentation(forTypeIdentifier: type) { url, _ in
+                        if let url, stageURL(url) { return }
+                        nextType(index + 1)
+                    }
                 }
             }
         }
 
-        _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, error in
-            if let data, !data.isEmpty {
-                stage(data, typeIdentifier: type)
-            } else {
-                loadAsObject()
-            }
-        }
+        nextType(0)
     }
 
     override func didSelectPost() {
