@@ -141,3 +141,21 @@ bash scripts/build.sh
 - 已確認項目：Telegram 聊天與訊息已讀狀態、訊息內連結 VoiceOver 動作、聊天列表刪除／離開群組與頻道、語音／音檔背景及鎖定畫面播放、VoiceOver 雙指雙擊播放／暫停；原有登入、跨 App 分享、附件原檔名與檔案傳送維持正常。
 - **往後開發一律以 `feat/stable-chat-links-read-delete` 作為基準**；僅開新功能分支，未經使用者要求不要合併至 `main`，也不要把背景 APNs 推播實驗分支的程式重新帶入。
 - 現階段無需額外回歸、防禦性測試，OC 按使用者指示負責拉取及編譯；使用者有需要再個別回報問題。
+
+## 2026-11-17 — iOS 截圖預覽畫面直接分享失效（最新）
+
+**基準釐清**：使用者已由 OC 將穩定分支合併至 `main`。2026-11-17 的 `main` HEAD 是 `f0f1727fa264da13aeb045ee904e0d2bd735fc15`；原功能分支已刪。**本修復分支 `fix/screenshot-share-extension` 直接由該穩定 main HEAD 建立**，沒有背景 APNs 實驗內容，不更改 `main`。
+
+使用者回報：從相簿、檔案等正常分享都可以成功，但在**iOS 截圖預覽／編輯畫面**直接選 Accessi Gram 分享，按傳送後會直接回到選擇分享 App 的系統畫面，沒有顯示失敗。此處是使用者實測現象；未取得裝置崩潰日誌，不應斷言唯一根因。
+
+### 實際修正：`ShareExtension/ShareViewController.swift`
+
+- 舊版在 `NSItemProvider` 圖片路徑對 `image as! UIImage`、`image.jpegData(...)!`、檔案路徑 `item as! URL` 強制轉型／解包。截圖預覽可傳遞 in-memory PNG `Data`、UIImage、暫存檔 URL 或多種 representation，型態不符可能直接令 Share Extension 終止，導致無錯誤提示回到系統分享列表。
+- 新增 `loadScreenshot()`：優先 `loadDataRepresentation` 取得 PNG/JPEG/HEIC 原始資料，必要時後退到 `loadObject(UIImage)` 和 `loadItem`。截圖 PNG 原樣保留，不額外 JPEG 有損壓縮；先寫入延伸功能私有的臨時路徑，再用既有 `ShareMailbox.stageFile` 搬到分享沙盒。
+- 保留一般檔案的原始檔名與既有安全範圍檔案 URL 邏輯，不能因新增截圖支援讓正常的 Files／相簿分享退化。
+- 讀取附件時移除強制轉型。處理完成後，若附件與說明文字均為空，不呼叫 TDLib send，顯示「沒有取得可傳送的截圖或文字」；任一 provider 無法讀取，顯示實際的「讀取分享內容失敗」而非無提示返回。
+- 成功送達仍保留原流程：只有 `ExtensionTelegramSender.send` 確認完成後呼叫 `extensionContext.completeRequest`；失敗可在分享視窗查看原因、重試。
+
+### 交付
+
+OC 從 `fix/screenshot-share-extension` 拉取編譯並在 GitHub Actions 雲端 macOS 產出 unsigned IPA，再由既有小白簽覆蓋安裝。維持 `org.accessigram.native`、主 App 與 Share Extension 獨立 TDLib 登入及 API 配置，**不要刪掉 App／清除 Keychain 或資料庫**。本輪未執行本地 Xcode 回歸／防禦型測試，使用者負責測試截圖預覽分享；未實測成功前不合併 `main`。
