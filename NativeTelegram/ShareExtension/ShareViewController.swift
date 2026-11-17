@@ -218,7 +218,13 @@ final class ShareViewController: SLComposeServiceViewController {
                                 url, name: url.lastPathComponent, id: draftID
                             )))
                         } catch {
-                            finished(.failure(error))
+                            if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                                // A screenshot preview's ephemeral file URL may
+                                // already be invalid. Try its UIImage representation.
+                                self.loadScreenshot(provider, draftID: draftID, completion: finished)
+                            } else {
+                                finished(.failure(error))
+                            }
                         }
                     } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
                         // Screenshot preview may advertise fileURL even when it
