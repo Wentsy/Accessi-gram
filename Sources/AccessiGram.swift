@@ -226,7 +226,6 @@ private func installEscape() {
     }
 }
 private final class ChatState: NSObject {
-    var pendingLatest = true
     var actionsInstalled = false
 }
 private var chatStateKey: UInt8 = 0
@@ -250,7 +249,6 @@ private func configureChat(_ controller: UIViewController) {
         // A persistent rotor action works even when Telegram hides its down-arrow view.
         let latestAction = UIAccessibilityCustomAction(name: "跳到最新訊息") { [weak controller] _ in
             guard let controller else { return false }
-            state(controller).pendingLatest = false
             return latest(controller)
         }
         controller.view.accessibilityCustomActions = (controller.view.accessibilityCustomActions ?? []) + [latestAction]
@@ -258,11 +256,7 @@ private func configureChat(_ controller: UIViewController) {
             historyView.accessibilityCustomActions = (historyView.accessibilityCustomActions ?? []) + [latestAction]
         }
     }
-    // Wait for actual loaded items, not a fixed delay. Never move again after the first entry.
-    if current.pendingLatest, !list(field(listNode, "itemNodes")).isEmpty {
-        current.pendingLatest = false
-        _ = latest(controller)
-    }
+
 }
 private func installChat() {
     target("_TtC10TelegramUI18ChatControllerImpl") { cls in
@@ -279,7 +273,7 @@ private func installChat() {
         let old = unsafeBitCast(method_getImplementation(class_getInstanceMethod(cls, sel)!), to: (@convention(c) (UIView, Selector) -> Void).self)
         let layout: @convention(block) (UIView) -> Void = { view in
             old(view, sel)
-            if UIAccessibility.isVoiceOverRunning, let vc = chatController(view), state(vc).pendingLatest {
+            if UIAccessibility.isVoiceOverRunning, let vc = chatController(view), !state(vc).actionsInstalled {
                 DispatchQueue.main.async { [weak vc] in if let vc { configureChat(vc) } }
             }
         }
@@ -289,7 +283,6 @@ private func installChat() {
         let scroll: @convention(block) (UIView, Int) -> Bool = { view, direction in
             if UIAccessibility.isVoiceOverRunning, let history = HistoryViewport(view),
                let move = HistoryDirection(direction) {
-                state(history.chat).pendingLatest = false
                 return pageHistory(history, direction: move, anchor: history.readingAnchor(direction))
             }
             return original(view, scrollSel, direction)
@@ -318,7 +311,7 @@ public func AGStart() {
     installSupplementalControls()
     installChat()
     installHistoryReading()
-    NSLog("[Accessi gram] 0.2.5 loaded; installed %ld target hooks", installed.count)
+    NSLog("[Accessi gram] turrit-chat-preview-1 loaded; installed %ld target hooks", installed.count)
 }
 
 private func objectField(_ object: Any, _ name: String) -> NSObject? {
@@ -641,8 +634,87 @@ private func messageElement(_ item: NSObject, row: UIView) -> UIView {
     }
     area.accessibilityLabel = label
     area.accessibilityValue = value
+    let readerTitle = "用訊息列表閱讀"
+    if !(area.accessibilityCustomActions ?? []).contains(where: { $0.name == readerTitle }) {
+        let readerAction = UIAccessibilityCustomAction(name: readerTitle) { [weak area] _ in
+            guard let area, let history = HistoryViewport(containing: area),
+                  history.chat.presentedViewController == nil else { return false }
+            let rows = history.messages()
+            guard let index = rows.firstIndex(where: { $0.element === area }) else { return false }
+            let labels = rows.map { row in
+                [row.element.accessibilityLabel, row.element.accessibilityValue]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "，")
+            }
+            let reader = ChatPageReader(style: .plain)
+            reader.messages = labels
+            reader.startIndex = index
+            reader.origin = area
+            reader.title = history.chat.title ?? "聊天訊息"
+            let nav = UINavigationController(rootViewController: reader)
+            nav.modalPresentationStyle = .fullScreen
+            history.chat.present(nav, animated: !UIAccessibility.isReduceMotionEnabled)
+            return true
+        }
+        area.accessibilityCustomActions = (area.accessibilityCustomActions ?? []) + [readerAction]
+    }
     area.isAccessibilityElement = true
     return area
+}
+
+// A native reading surface for the current Turrit page. Keep Turrit as the
+// owner of the chat, notification route, account, composer and send actions.
+private final class ChatPageReader: UITableViewController {
+    var messages: [String] = []
+    var startIndex = 0
+    weak var origin: UIView?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "返回對話", style: .plain,
+                                                          target: self, action: #selector(closeReader))
+        tableView.allowsSelection = false
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 72
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "message")
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        let path = IndexPath(row: startIndex, section: 0)
+        tableView.scrollToRow(at: path, at: .middle, animated: false)
+        tableView.layoutIfNeeded()
+        UIAccessibility.post(notification: .screenChanged, argument: tableView.cellForRow(at: path))
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        messages.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "message", for: indexPath)
+        var content = cell.defaultContentConfiguration()
+        content.text = messages[indexPath.row]
+        content.textProperties.numberOfLines = 0
+        cell.contentConfiguration = content
+        cell.isAccessibilityElement = true
+        cell.accessibilityLabel = messages[indexPath.row]
+        cell.accessibilityTraits = .staticText
+        return cell
+    }
+
+    @objc private func closeReader() {
+        let source = origin
+        dismiss(animated: !UIAccessibility.isReduceMotionEnabled) {
+            if let source, source.window != nil {
+                UIAccessibility.post(notification: .layoutChanged, argument: source)
+            }
+        }
+    }
+
+    override func accessibilityPerformEscape() -> Bool {
+        closeReader()
+        return true
+    }
 }
 
 private enum HistoryDirection {
@@ -785,7 +857,6 @@ private final class HistoryBoundary: UIAccessibilityElement {
 
     override func accessibilityActivate() -> Bool {
         guard let viewport, let history = HistoryViewport(viewport), let anchor else { return false }
-        state(history.chat).pendingLatest = false
         return pageHistory(history, direction: direction, anchor: anchor, boundary: self)
     }
 
@@ -942,7 +1013,6 @@ private func installHistoryReading() {
                   attachedNode(view).map(className) == "_TtC7Display21AccessibilityAreaNode",
                   let history = HistoryViewport(containing: view) else { return }
             let rows = history.messages()
-            state(history.chat).pendingLatest = false
             // At a visible edge, expose the neighboring bubble before the next swipe.
             let direction: HistoryDirection
             if rows.first?.element === view { direction = .older }
@@ -997,7 +1067,6 @@ private func installHistoryReading() {
             if UIAccessibility.isVoiceOverRunning,
                attachedNode(view).map(className) == "_TtC7Display21AccessibilityAreaNode",
                let history = HistoryViewport(containing: view), let direction = HistoryDirection(raw) {
-                state(history.chat).pendingLatest = false
                 let isReading = raw == UIAccessibilityScrollDirection.next.rawValue ||
                     raw == UIAccessibilityScrollDirection.previous.rawValue
                 return pageHistory(history, direction: direction, anchor: isReading ? view : nil)
