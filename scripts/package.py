@@ -40,35 +40,57 @@ def inject(data, install_name):
     return bytes(data)
 
 
+def write_native_share(dst, native, share, identifier, host_info):
+    prefix = 'Payload/AccessiGramNative.app/PlugIns/AccessiGramShareExtension.appex/'
+    info = plistlib.loads(native.read(prefix + 'Info.plist'))
+    assert info['NSExtension']['NSExtensionPointIdentifier'] == 'com.apple.share-services'
+    info['CFBundleIdentifier'] = identifier
+    for key in ('CFBundleVersion', 'CFBundleShortVersionString'):
+        info[key] = host_info[key]
+    # The native extension is independently logged in and statically links TDLib.
+    # Retain its executable name, principal class and injected API settings.
+    for entry in native.infolist():
+        if not entry.filename.startswith(prefix):
+            continue
+        name = entry.filename[len(prefix):]
+        if not name or '_CodeSignature/' in name or name.endswith('embedded.mobileprovision'):
+            continue
+        data = plistlib.dumps(info, fmt=plistlib.FMT_BINARY) if name == 'Info.plist' else native.read(entry)
+        entry.filename = share + name
+        dst.writestr(entry, data)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('ipa', type=Path)
     parser.add_argument('dylib', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--native-ipa', required=True, type=Path, help='Accessi Gram Native IPA built from this stable baseline')
     args = parser.parse_args()
     assert hashlib.sha256(args.ipa.read_bytes()).hexdigest() == BASE_SHA256, 'This patch targets the supplied Turrit 1.5.5 IPA only'
     library = args.dylib.read_bytes()
     assert library[:4] == b'\xcf\xfa\xed\xfe', 'Build the arm64 iOS dylib first'
-    with zipfile.ZipFile(args.ipa) as src, zipfile.ZipFile(args.output, 'w', zipfile.ZIP_DEFLATED) as dst:
+    with zipfile.ZipFile(args.ipa) as src, zipfile.ZipFile(args.native_ipa) as native, zipfile.ZipFile(args.output, 'w', zipfile.ZIP_DEFLATED) as dst:
         app = 'Payload/Turrit.app/'
         main_info = plistlib.loads(src.read(app + 'Info.plist'))
         share = app + 'PlugIns/TurritShareExtension.appex/'
         share_info = plistlib.loads(src.read(share + 'Info.plist'))
         executables = {
             app + main_info['CFBundleExecutable']: '@executable_path/Frameworks/AccessiGram.dylib',
-            share + share_info['CFBundleExecutable']: '@executable_path/../../Frameworks/AccessiGram.dylib',
         }
         for entry in src.infolist():
+            if entry.filename.startswith(share):
+                continue
             if '/_CodeSignature/' in entry.filename or entry.filename.endswith('/embedded.mobileprovision'):
                 continue
             data = src.read(entry)
             if entry.filename in executables:
                 data = inject(data, executables[entry.filename])
-            if entry.filename in (app + 'Info.plist', share + 'Info.plist'):
+            if entry.filename == app + 'Info.plist':
                 info = plistlib.loads(data)
                 info['CFBundleDisplayName'] = 'Accessi gram'
                 info['CFBundleName'] = 'Accessi gram'
-                info['AccessiGramPatchVersion'] = '0.2.5'
+                info['AccessiGramPatchVersion'] = 'turrit-chat-preview-1'
                 data = plistlib.dumps(info, fmt=plistlib.FMT_BINARY)
             # A localized InfoPlist name takes precedence over the main plist.
             if entry.filename.startswith(app) and entry.filename.endswith('/InfoPlist.strings') and '/PlugIns/' not in entry.filename:
@@ -79,6 +101,7 @@ def main():
                             localized[key] = 'Accessi gram'
                     data = plistlib.dumps(localized, fmt=plistlib.FMT_BINARY)
             dst.writestr(entry, data)
+        write_native_share(dst, native, share, share_info['CFBundleIdentifier'], main_info)
         dst.writestr(app + 'Frameworks/AccessiGram.dylib', library)
     print(f'{args.output}: unsigned IPA; re-sign the app, frameworks and extensions before installation')
 
