@@ -1,12 +1,15 @@
 name: Build Accessi gram
 on:
   push:
-    branches: [main, experiment/turrit-accessible-chat]
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   build:
+    if: github.event_name != 'pull_request' || github.head_ref == 'experiment/turrit-accessible-chat'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -19,3 +22,11 @@ jobs:
             build/AccessiGram.dylib
             scripts/package.py
             README.md
+      - name: Build stable share extension for local hybrid packaging
+        if: github.head_ref == 'experiment/turrit-accessible-chat'
+        run: bash NativeTelegram/scripts/build.sh
+      - uses: actions/upload-artifact@v4
+        if: github.head_ref == 'experiment/turrit-accessible-chat'
+        with:
+          name: stable-native-for-packaging
+          path: NativeTelegram/dist/AccessiGramNative-unsigned.ipa
