@@ -238,6 +238,11 @@ final class TelegramService: ObservableObject {
             request("getMessage", ["chat_id": chatID, "message_id": id]) { [weak self] object in
                 self?.receive(object)
             }
+        case "updateMessageReactions":
+            threads[json.number("chat_id")]?.updateReactions(
+                json.number("message_id"),
+                interaction: ["reactions": json.object("reactions")]
+            )
         case "updateMessageInteractionInfo":
             threads[json.number("chat_id")]?.updateReactions(
                 json.number("message_id"),
@@ -733,7 +738,8 @@ final class TelegramService: ObservableObject {
             let chosen = message.reactions.filter(\.isChosen).map(\.emoji)
             let emojis = (chosen + offered.compactMap { item -> String? in
                 let type = item.object("type")
-                return type.text("@type") == "reactionTypeEmoji" ? type.text("emoji") : nil
+                return type.text("@type") == "reactionTypeEmoji" && !item.flag("is_premium")
+                    ? type.text("emoji") : nil
             }).filter { !$0.isEmpty && seen.insert($0).inserted }
             completion(emojis)
         }
