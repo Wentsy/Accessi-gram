@@ -589,6 +589,9 @@ final class TelegramService: ObservableObject {
                 model.merge(raw.map {
                     TelegramMessage($0, users: self.users, chats: self.chatsByID)
                 })
+                if before == 0 && model.hasOpened {
+                    self.markChatRead(id)
+                }
                 let reachedExisting = previousNewest == 0 ||
                     raw.contains(where: { $0.number("id") == previousNewest }) ||
                     raw.contains(where: { $0.number("id") < previousNewest })
@@ -625,7 +628,12 @@ final class TelegramService: ObservableObject {
             let priorOldest = model.messages.first?.id
             model.merge(page)
             model.loading = false
-            if raw.isEmpty && result.text("@type") != "error" {
+            if result.text("@type") == "error" {
+                // Keep the timeline eligible for a fresh fetch after reconnect.
+                model.isInitialized = false
+                return
+            }
+            if raw.isEmpty {
                 model.hasMore = false
             }
             model.paginationStallCount = (before > 0 && priorOldest == model.messages.first?.id)
