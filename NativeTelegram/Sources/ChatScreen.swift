@@ -14,7 +14,8 @@ struct ChatScreen: View {
     @State private var showPhotos = false
     @State private var mediaMessage: TelegramMessage?
     @State private var forwardMessage: TelegramMessage?
-    @State private var showingForward = false
+    @State private var showingChatSearch = false
+    @State private var searchSelection: TelegramMessage?
 
     init(chatID: Int64) {
         self.chatID = chatID
@@ -60,14 +61,33 @@ struct ChatScreen: View {
         }
         .navigationTitle(service.chatTitle(chatID))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showingChatSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .accessibilityLabel("搜尋聊天內容")
+                .accessibilityHint("以關鍵字搜尋目前聊天室的歷史訊息，支援繁簡中文")
+            }
+        }
         .onAppear { service.open(chatID) }
         .onDisappear { service.close(chatID) }
         .sheet(item: $mediaMessage) { message in
             AccessibleMediaSheet(message: message, service: service)
         }
-        .sheet(isPresented: $showingForward) {
-            if let message = forwardMessage {
-                AccessibleForwardSheet(message: message, service: service)
+        .sheet(item: $forwardMessage) { message in
+            AccessibleForwardSheet(message: message, service: service)
+        }
+        .sheet(isPresented: $showingChatSearch, onDismiss: {
+            if let searchSelection {
+                service.revealSearchResult(searchSelection)
+                self.searchSelection = nil
+            }
+        }) {
+            AccessibleChatSearchSheet(chatID: chatID, service: service) { message in
+                searchSelection = message
             }
         }
         .photosPicker(isPresented: $showPhotos, selection: $selectedPhoto, matching: .any(of: [.images, .videos]))
@@ -188,11 +208,22 @@ struct ChatScreen: View {
     }
 
     private func showReactionMenu(_ message: TelegramMessage) {
-        AccessibleSystemMenu.present(title: "選擇表情回應",
-            choices: ["👍", "❤️", "😂", "🎉", "😮", "🙏"].map {
-                AccessibleMenuChoice($0, "回應 \($0)")
-            }) { emoji in
-            service.react(message, emoji: emoji)
+        service.availableReactions(for: message) { emojis in
+            guard !emojis.isEmpty else {
+                UIAccessibility.post(notification: .announcement,
+                                     argument: "這則訊息目前不允許一般表情回應")
+                return
+            }
+            let selected = Set(service.thread(message.chatID).messages
+                .first(where: { $0.id == message.id })?.reactions
+                .filter(\.isChosen).map(\.emoji) ?? [])
+            AccessibleSystemMenu.present(title: "選擇表情回應",
+                choices: emojis.map {
+                    AccessibleMenuChoice($0, selected.contains($0)
+                        ? "取消 \($0) 回應" : "回應 \($0)")
+                }) { emoji in
+                service.react(message, emoji: emoji)
+            }
         }
     }
 
@@ -206,7 +237,7 @@ struct ChatScreen: View {
             UIPasteboard.general.string = message.body
             UIAccessibility.post(notification: .announcement, argument: "訊息已複製")
         case "open", "bot", "react", "forward", "edit":
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                 switch id {
                 case "open":
                     mediaMessage = message
@@ -216,7 +247,6 @@ struct ChatScreen: View {
                     showReactionMenu(message)
                 case "forward":
                     forwardMessage = message
-                    showingForward = true
                 case "edit":
                     AccessibleSystemMenu.editMessage(initial: message.body) { newText in
                         service.edit(message, newText: newText)
