@@ -113,8 +113,20 @@ final class TelegramService: ObservableObject {
     private var alreadyVibrated = Set<String>()
     private var recentVibrationIDs: [String] = []
     private var lastVibration = Date.distantPast
+    private var foregroundObserver: NSObjectProtocol?
+    private var reconciliationInProgress = Set<Int64>()
+    private var connectionWasInterrupted = false
 
-    private init() {}
+    private init() {
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.reconcileOpenedChats()
+            }
+        }
+    }
 
     func start() {
         guard clientID == 0 else { return }
@@ -180,6 +192,16 @@ final class TelegramService: ObservableObject {
         switch json.text("@type") {
         case "updateAuthorizationState":
             handleAuth(json.object("authorization_state"))
+        case "updateConnectionState":
+            let state = json.object("state").text("@type")
+            if state == "connectionStateReady" {
+                if connectionWasInterrupted {
+                    connectionWasInterrupted = false
+                    reconcileOpenedChats()
+                }
+            } else {
+                connectionWasInterrupted = true
+            }
         case "updateNewChat":
             addChat(json.object("chat"))
         case "updateChatTitle":
@@ -489,6 +511,8 @@ final class TelegramService: ObservableObject {
         if !model.isInitialized {
             model.isInitialized = true
             history(id, before: 0)
+        } else {
+            reconcileRecentMessages(id)
         }
     }
 
@@ -532,6 +556,57 @@ final class TelegramService: ObservableObject {
         }
     }
 
+    // Reconcile against the server after a network interruption, app resume,
+    // or reopening a cached conversation. Page backwards until reaching the
+    // previously displayed newest message, so a burst of missed updates is
+    // restored instead of fetching only the most recent screenful.
+    private func reconcileOpenedChats() {
+        guard authStage == .ready else { return }
+        for (id, model) in threads where model.hasOpened {
+            reconcileRecentMessages(id)
+        }
+    }
+
+    private func reconcileRecentMessages(_ id: Int64) {
+        guard authStage == .ready, !reconciliationInProgress.contains(id) else { return }
+        let model = thread(id)
+        guard !model.loading else { return }
+        reconciliationInProgress.insert(id)
+        let previousNewest = model.messages.last?.id ?? 0
+
+        func fetch(before: Int64, remainingPages: Int) {
+            request("getChatHistory", [
+                "chat_id": id, "from_message_id": before,
+                "offset": 0, "limit": 100, "only_local": false
+            ]) { [weak self] result in
+                guard let self else { return }
+                let raw = result.objects("messages")
+                if result.text("@type") == "error" {
+                    self.reconciliationInProgress.remove(id)
+                    return
+                }
+                raw.forEach { self.loadSender($0) }
+                model.merge(raw.map {
+                    TelegramMessage($0, users: self.users, chats: self.chatsByID)
+                })
+                if before == 0 && model.hasOpened {
+                    self.markChatRead(id)
+                }
+                let reachedExisting = previousNewest == 0 ||
+                    raw.contains(where: { $0.number("id") == previousNewest }) ||
+                    raw.contains(where: { $0.number("id") < previousNewest })
+                if reachedExisting || raw.isEmpty || remainingPages <= 1 {
+                    self.reconciliationInProgress.remove(id)
+                } else if let oldest = raw.last?.number("id"), oldest != before {
+                    fetch(before: oldest, remainingPages: remainingPages - 1)
+                } else {
+                    self.reconciliationInProgress.remove(id)
+                }
+            }
+        }
+        fetch(before: 0, remainingPages: 10)
+    }
+
     func older(_ id: Int64) {
         let model = thread(id)
         guard !model.loading && model.hasMore else { return }
@@ -553,7 +628,12 @@ final class TelegramService: ObservableObject {
             let priorOldest = model.messages.first?.id
             model.merge(page)
             model.loading = false
-            if raw.isEmpty && result.text("@type") != "error" {
+            if result.text("@type") == "error" {
+                // Keep the timeline eligible for a fresh fetch after reconnect.
+                model.isInitialized = false
+                return
+            }
+            if raw.isEmpty {
                 model.hasMore = false
             }
             model.paginationStallCount = (before > 0 && priorOldest == model.messages.first?.id)
