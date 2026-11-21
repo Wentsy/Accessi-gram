@@ -238,6 +238,11 @@ final class TelegramService: ObservableObject {
             request("getMessage", ["chat_id": chatID, "message_id": id]) { [weak self] object in
                 self?.receive(object)
             }
+        case "updateMessageInteractionInfo":
+            threads[json.number("chat_id")]?.updateReactions(
+                json.number("message_id"),
+                interaction: json.object("interaction_info")
+            )
         case "updateDeleteMessages":
             let ids = Set(json.intIDs("message_ids"))
             threads[json.number("chat_id")]?.remove(ids)
@@ -708,12 +713,62 @@ final class TelegramService: ObservableObject {
         }
     }
 
+    /// Ask TDLib which reactions the particular message permits. Bots and
+    /// restricted chats often allow none, so never offer a hard-coded palette.
+    func availableReactions(for message: TelegramMessage,
+                            completion: @escaping ([String]) -> Void) {
+        request("getMessageAvailableReactions", [
+            "chat_id": message.chatID,
+            "message_id": message.id,
+            "row_size": 8
+        ]) { response in
+            if response.text("@type") == "error" {
+                completion([])
+                return
+            }
+            let offered = response.objects("top_reactions")
+                + response.objects("recent_reactions")
+                + response.objects("popular_reactions")
+            var seen = Set<String>()
+            let chosen = message.reactions.filter(\.isChosen).map(\.emoji)
+            let emojis = (chosen + offered.compactMap { item -> String? in
+                let type = item.object("type")
+                return type.text("@type") == "reactionTypeEmoji" ? type.text("emoji") : nil
+            }).filter { !$0.isEmpty && seen.insert($0).inserted }
+            completion(emojis)
+        }
+    }
+
     func react(_ message: TelegramMessage, emoji: String) {
-        command("addMessageReaction", [
+        let chosen = thread(message.chatID).messages
+            .first(where: { $0.id == message.id })?.reactions
+            .contains(where: { $0.emoji == emoji && $0.isChosen }) ?? false
+        let method = chosen ? "removeMessageReaction" : "addMessageReaction"
+        var arguments: JSONObject = [
             "chat_id": message.chatID, "message_id": message.id,
-            "reaction_type": ["@type": "reactionTypeEmoji", "emoji": emoji],
-            "is_big": false, "update_recent_reactions": true
-        ])
+            "reaction_type": ["@type": "reactionTypeEmoji", "emoji": emoji]
+        ]
+        if !chosen {
+            arguments["is_big"] = false
+            arguments["update_recent_reactions"] = true
+        }
+        request(method, arguments) { [weak self] response in
+            guard let self else { return }
+            if response.text("@type") == "error" {
+                let reason = response.text("message")
+                self.errorMessage = "表情回應失敗：\(reason)"
+                UIAccessibility.post(notification: .announcement,
+                                     argument: "無法回應 \(emoji)：\(reason)")
+                return
+            }
+            UIAccessibility.post(notification: .announcement,
+                                 argument: chosen ? "已取消 \(emoji) 回應" : "已回應 \(emoji)")
+            self.request("getMessage", [
+                "chat_id": message.chatID, "message_id": message.id
+            ]) { [weak self] updated in
+                if updated.text("@type") == "message" { self?.receive(updated) }
+            }
+        }
     }
 
     func delete(_ message: TelegramMessage) {
@@ -728,12 +783,95 @@ final class TelegramService: ObservableObject {
         ])
     }
 
-    func forward(_ message: TelegramMessage, to targetID: Int64) {
-        command("forwardMessages", [
-            "chat_id": targetID, "from_chat_id": message.chatID,
-            "message_ids": [message.id], "send_copy": false,
-            "remove_caption": false, "only_preview": false
-        ])
+    func forward(_ message: TelegramMessage, to targetID: Int64,
+                 completion: @escaping (Bool, String) -> Void) {
+        request("forwardMessages", [
+            "chat_id": targetID,
+            "from_chat_id": message.chatID,
+            "message_ids": [message.id],
+            "options": [
+                "@type": "messageSendOptions",
+                "disable_notification": false,
+                "from_background": false,
+                "protect_content": false
+            ] as JSONObject,
+            "send_copy": false,
+            "remove_caption": false
+        ]) { [weak self] response in
+            if response.text("@type") == "error" {
+                let reason = response.text("message")
+                self?.errorMessage = "轉寄訊息失敗：\(reason)"
+                completion(false, reason)
+            } else {
+                completion(true, "")
+            }
+        }
+    }
+
+    /// Search the actual chat history, not just the currently displayed page.
+    /// Multiple server-side queries bridge Traditional and Simplified Chinese.
+    func searchChatMessages(chatID: Int64, query: String,
+                            completion: @escaping ([TelegramMessage]) -> Void) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { completion([]); return }
+
+        let simplified = trimmed.applyingTransform(
+            StringTransform(rawValue: "Traditional-Simplified"), reverse: false
+        ) ?? trimmed
+        let traditional = trimmed.applyingTransform(
+            StringTransform(rawValue: "Simplified-Traditional"), reverse: false
+        ) ?? trimmed
+        var seenQueries = Set<String>()
+        let queries = [trimmed, simplified, traditional]
+            .filter { seenQueries.insert($0).inserted }
+        var results: [Int64: TelegramMessage] = [:]
+        var remaining = queries.count
+
+        func fetchPage(_ term: String, before: Int64, page: Int) {
+            request("searchChatMessages", [
+                "chat_id": chatID, "query": term,
+                "from_message_id": before,
+                "offset": 0, "limit": 100
+            ]) { [weak self] response in
+                guard let self else { return }
+                let raw = response.objects("messages")
+                for item in raw {
+                    self.loadSender(item)
+                    let message = TelegramMessage(item, users: self.users, chats: self.chatsByID)
+                    results[message.id] = message
+                }
+                let next = response.number("next_from_message_id")
+                if page < 5, next > 0, next != before, !raw.isEmpty {
+                    fetchPage(term, before: next, page: page + 1)
+                } else {
+                    remaining -= 1
+                    if remaining == 0 {
+                        completion(results.values.sorted { $0.id > $1.id })
+                    }
+                }
+            }
+        }
+        for term in queries { fetchPage(term, before: 0, page: 0) }
+    }
+
+    func revealSearchResult(_ message: TelegramMessage) {
+        let model = thread(message.chatID)
+        request("getChatHistory", [
+            "chat_id": message.chatID,
+            "from_message_id": message.id,
+            "offset": -20, "limit": 50, "only_local": false
+        ]) { [weak self] response in
+            guard let self else { return }
+            let raw = response.objects("messages")
+            raw.forEach { self.loadSender($0) }
+            model.merge(raw.map {
+                TelegramMessage($0, users: self.users, chats: self.chatsByID)
+            })
+            if !model.messages.contains(where: { $0.id == message.id }) {
+                model.merge([message])
+            }
+            model.focusMessageID = message.id
+        }
     }
 
     func setPinned(chatID: Int64, value: Bool) {
