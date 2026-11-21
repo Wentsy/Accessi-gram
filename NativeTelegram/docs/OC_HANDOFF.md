@@ -1,6 +1,6 @@
 # OC 接手打包 — Accessi Gram Native（最新整合版）
 
-分支：`feat/stable-chat-links-read-delete`（新功能分支；起點是 OC 已修正分享附件原始檔名的穩定提交 `d97358311f4cb48de69c7d149d410098e73152ab`）
+本輪交付分支：fix/reactions-forward-chat-search（從 2026-11-17 已確認穩定的 main 提交 ca50198605e20c8912b51b27158b64f453edc956 建立；以下舊段落僅供歷史參考）
 
 本文件是目前有效的打包參考，取代舊版曾經要求 App Groups、背景 APNs、分享資料庫快照與人工「聊天輸入列」的做法。**main 不動**。使用者 iPhone 為 iOS 18.7.8，採用「小白簽」簽名，無法取得 App Groups 共用容器。
 
@@ -189,3 +189,16 @@ OC 從 `fix/screenshot-share-extension` 拉取編譯並在 GitHub Actions 雲端
 - 後續 OC 與更新工作**以 `main` 為唯一最新穩定基準**；後續新增功能另開分支。不要把已刪除的 `feat/stable-chat-links-read-delete` 當作活躍分支。
 - 使用者會自行請 OC 清理舊測試分支；本次保留 `fix/screenshot-share-extension` 供對照，不代為刪除。
 - 已由使用者完成真機驗證；本次不新增回歸測試或變更程式功能，只更新穩定基準文件並合併。
+
+## 2026-11-21 — 表情回應、轉寄 VoiceOver、聊天內搜尋（待使用者實測）
+
+**交付分支**：fix/reactions-forward-chat-search，以使用者確認穩定的 main 為基礎；main 尚未更動。
+
+- TelegramService.swift：使用 getMessageAvailableReactions 查詢特定訊息可回應的表情；機器人或受限訊息不再硬列固定六種。新增 addMessageReaction/removeMessageReaction 結果提示與 updateMessageInteractionInfo/updateMessageReactions 狀態更新。
+- TelegramModels.swift、AccessibleMessageTimeline.swift：將表情數量及自己是否已回應加入 VoiceOver 朗讀；移除訊息朗讀中多餘的連結轉輪提示，原本每個連結的無障礙轉輪動作仍保留。
+- AccessibleForwardSheet.swift、ChatScreen.swift：移除 SwiftUI 彈窗內嵌 UIKit 導覽和搜尋控制器的轉寄呈現，改成單一 SwiftUI 收件者搜尋清單與 .sheet(item:)。使用原生 forwardMessages 保留圖片、檔案、連結及媒體說明，回報失敗原因。
+- AccessibleChatSearchSheet.swift：聊天室右上角加入搜尋入口，查詢 Telegram 歷史訊息原文及簡繁轉換字形；點選結果後跳回原聊天室對應訊息，將 VoiceOver 焦點定位到訊息。
+- AccessibleHelp.swift：加入表情、轉寄、搜尋使用指南。NativeTelegram/project.yml 自動收錄 Sources 下新增的 Swift 檔案。
+- 保持原 Bundle ID、Keychain、TDLib 資料庫、Share Extension 與既有登入，不需刪除 App 或重新登入；不把背景 APNs 推播實驗帶回。
+
+**交付界線**：僅提交 Swift 原始碼及文件，未進行本機 Xcode 編譯、回歸／防禦型測試或真機 VoiceOver 驗證。由 OC 拉取修復分支編譯，必要時修正相容性問題；等使用者確認後再決定是否合併 main。
