@@ -71,6 +71,21 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
             self.onOpenLink = onOpenLink
         }
 
+        private func focusSearchResult(in table: UITableView) {
+            guard let id = thread.focusMessageID,
+                  let index = rendered.firstIndex(where: { $0.id == id }) else { return }
+            thread.focusMessageID = nil
+            let path = IndexPath(row: index, section: 0)
+            table.layoutIfNeeded()
+            table.scrollToRow(at: path, at: .middle, animated: false)
+            table.layoutIfNeeded()
+            DispatchQueue.main.async {
+                if let cell = table.cellForRow(at: path) {
+                    UIAccessibility.post(notification: .layoutChanged, argument: cell)
+                }
+            }
+        }
+
         func loadOlder() { service.older(thread.chatID) }
         func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
             rendered.count
@@ -118,7 +133,10 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
         }
 
         func apply(_ messages: [TelegramMessage], to table: UITableView) {
-            if rendered == messages { return }
+            if rendered == messages {
+                focusSearchResult(in: table)
+                return
+            }
             let old = rendered
             let oldIDs = old.map(\.id)
             let newIDs = messages.map(\.id)
@@ -131,6 +149,7 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
                         configure(cell, message: messages[path.row], index: path.row)
                     }
                 }
+                focusSearchResult(in: table)
                 return
             }
 
@@ -158,8 +177,9 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
                     initialScrollDone = true
                     let end = IndexPath(row: messages.count - 1, section: 0)
                     table.scrollToRow(at: end, at: .bottom, animated: false)
-                    // Focus is left to the system: do not steal it from the navigation title.
+                    // Routine first loads do not steal focus; explicit search jumps do.
                 }
+                focusSearchResult(in: table)
                 return
             }
 
@@ -184,6 +204,7 @@ struct AccessibleMessageTimeline: UIViewRepresentable {
                             self.configure(cell, message: messages[path.row], index: path.row)
                         }
                     }
+                    self.focusSearchResult(in: table)
                 }
             }
         }

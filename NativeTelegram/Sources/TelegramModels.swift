@@ -150,6 +150,12 @@ struct TelegramMessageLink: Equatable {
     }
 }
 
+struct TelegramReaction: Equatable {
+    let emoji: String
+    let count: Int
+    let isChosen: Bool
+}
+
 struct TelegramMessage: Identifiable, Equatable {
     let id: Int64
     let chatID: Int64
@@ -164,12 +170,28 @@ struct TelegramMessage: Identifiable, Equatable {
     var keyboardButtons: [BotButton]
     var translated: String?
     var replyID: Int64
+    var reactions: [TelegramReaction]
+
+    static func readReactions(_ interaction: JSONObject) -> [TelegramReaction] {
+        interaction.object("reactions").objects("reactions").compactMap { item in
+            let type = item.object("type")
+            guard type.text("@type") == "reactionTypeEmoji" else { return nil }
+            return TelegramReaction(
+                emoji: type.text("emoji"),
+                count: Int(item.number("total_count")),
+                isChosen: item.flag("is_chosen")
+            )
+        }
+    }
 
     var spoken: String {
         let result = translated.map { "，翻譯：\($0)" } ?? ""
         let timestamp = Self.timestamp.string(from: date)
-        let linkHint = links.isEmpty ? "" : "，包含 \(links.count) 個連結，可使用轉輪動作開啟"
-        return "\(sender)，\(body)\(result)\(linkHint)，\(timestamp)"
+        let reactionSummary = reactions.isEmpty ? "" : "，表情回應：" +
+            reactions.map {
+                "\($0.emoji) \($0.count)" + ($0.isChosen ? "，我已回應" : "")
+            }.joined(separator: "，")
+        return "\(sender)，\(body)\(result)\(reactionSummary)，\(timestamp)"
     }
 
     static let timestamp: DateFormatter = {
@@ -184,6 +206,7 @@ struct TelegramMessage: Identifiable, Equatable {
         lhs.id == rhs.id && lhs.sender == rhs.sender && lhs.body == rhs.body &&
         lhs.links == rhs.links &&
         lhs.fileID == rhs.fileID && lhs.translated == rhs.translated &&
+        lhs.reactions == rhs.reactions &&
         lhs.buttons.map(\.id) == rhs.buttons.map(\.id)
     }
 
@@ -193,6 +216,7 @@ struct TelegramMessage: Identifiable, Equatable {
         outgoing = raw.flag("is_outgoing")
         date = Date(timeIntervalSince1970: TimeInterval(raw.number("date")))
         replyID = raw.object("reply_to").number("message_id")
+        reactions = Self.readReactions(raw.object("interaction_info"))
         let from = raw.object("sender_id")
         if outgoing {
             sender = "我"
@@ -307,6 +331,7 @@ final class MessageThread: ObservableObject {
     @Published var hasMore = true
     @Published var replyTo: TelegramMessage?
     @Published var translationCache: [Int64: String] = [:]
+    @Published var focusMessageID: Int64?
     var hasOpened = false
     var isInitialized = false
     var paginationStallCount = 0
@@ -321,6 +346,12 @@ final class MessageThread: ObservableObject {
             byID[message.id] = message
         }
         messages = byID.values.sorted { $0.id < $1.id }
+    }
+
+    func updateReactions(_ messageID: Int64, interaction: JSONObject) {
+        if let index = messages.firstIndex(where: { $0.id == messageID }) {
+            messages[index].reactions = TelegramMessage.readReactions(interaction)
+        }
     }
 
     func remove(_ ids: Set<Int64>) {
